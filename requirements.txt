@@ -1,5 +1,9 @@
-streamlit
-anthropic
-google-api-python-client
-google-auth
-gspread
+anthropic==0.39.0
+gspread==5.12.0
+google-auth==2.25.2
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+PyPDF2==3.0.1
+duckduckgo-search==3.9.6
+python-dotenv==1.0.0
