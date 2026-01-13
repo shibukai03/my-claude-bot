@@ -4,7 +4,6 @@ import requests
 import logging
 from bs4 import BeautifulSoup
 from typing import Dict, Optional
-import PyPDF2
 import io
 
 logger = logging.getLogger(__name__)
@@ -36,9 +35,12 @@ class ContentExtractor:
             
             soup = BeautifulSoup(response.content, 'html.parser')
             
+            # タイトル取得
             title = ''
-            if soup.title:
+            if soup.title and soup.title.string:
                 title = soup.title.string.strip()
+            elif soup.h1:
+                title = soup.h1.get_text().strip()
             
             # 不要タグ除去
             for tag in soup(['script', 'style', 'nav', 'header', 'footer']):
@@ -69,6 +71,8 @@ class ContentExtractor:
     def _extract_pdf(self, url: str) -> Optional[Dict]:
         """PDFからテキスト抽出"""
         try:
+            import PyPDF2
+            
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             
@@ -77,7 +81,9 @@ class ContentExtractor:
             
             text_parts = []
             for page in pdf_reader.pages:
-                text_parts.append(page.extract_text())
+                text = page.extract_text()
+                if text:
+                    text_parts.append(text)
             
             full_text = '\n'.join(text_parts)
             title = url.split('/')[-1]
@@ -90,7 +96,9 @@ class ContentExtractor:
                 'pdf_links': []
             }
             
+        except ImportError:
+            logger.error("PyPDF2 が利用できません")
+            return None
         except Exception as e:
             logger.error(f"PDF抽出エラー: {url} - {e}")
             return None
-```
