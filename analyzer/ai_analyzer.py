@@ -4,7 +4,6 @@ import logging
 import json
 import os
 from typing import Dict, Optional
-from anthropic import Anthropic
 import re
 
 logger = logging.getLogger(__name__)
@@ -18,9 +17,14 @@ class AIAnalyzer:
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY が設定されていません")
         
-        self.client = Anthropic(api_key=api_key)
-        self.model = "claude-3-5-sonnet-20241022"
-        logger.info(f"AIAnalyzer初期化完了")
+        try:
+            from anthropic import Anthropic
+            self.client = Anthropic(api_key=api_key)
+            self.model = "claude-3-5-sonnet-20241022"
+            logger.info("AIAnalyzer初期化完了")
+        except ImportError:
+            logger.error("anthropic パッケージが利用できません")
+            raise
     
     def analyze_project(self, content_data: Dict) -> Optional[Dict]:
         """案件コンテンツを解析"""
@@ -28,6 +32,7 @@ class AIAnalyzer:
         content = content_data.get('content', '')
         
         if not content or len(content.strip()) < 50:
+            logger.warning("コンテンツが不十分です")
             return None
         
         # コンテンツを15000文字に制限
@@ -52,17 +57,15 @@ class AIAnalyzer:
 5. confidence (string): "高"/"中"/"低"
 6. project_type (string): 案件種別
 
-回答形式:
-```json
+回答形式（このJSONのみを返してください）:
 {{
   "is_video_project": true,
-  "summary": "要約",
+  "summary": "要約文",
   "deadline": "2024-03-15",
   "application_url": "",
   "confidence": "高",
   "project_type": "プロモーション映像制作"
 }}
-```
 """
         
         try:
@@ -88,6 +91,7 @@ class AIAnalyzer:
     def _parse_response(self, response_text: str) -> Optional[Dict]:
         """レスポンスからJSON抽出"""
         try:
+            # JSONブロック抽出
             json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
@@ -96,19 +100,25 @@ class AIAnalyzer:
                 if json_match:
                     json_str = json_match.group(0)
                 else:
+                    logger.error("JSON形式が見つかりません")
                     return None
             
             result = json.loads(json_str)
             
+            # 必須フィールドチェック
             required_fields = ['is_video_project', 'summary', 'deadline', 'application_url']
             for field in required_fields:
                 if field not in result:
+                    logger.error(f"必須フィールド '{field}' がありません")
                     return None
             
             return result
             
-        except Exception as e:
+        except json.JSONDecodeError as e:
             logger.error(f"JSON解析エラー: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"レスポンス処理エラー: {e}")
             return None
     
     def batch_analyze(self, content_list: list) -> list:
@@ -123,7 +133,8 @@ class AIAnalyzer:
             if analysis and analysis.get('is_video_project'):
                 merged_result = {**content_data, **analysis}
                 results.append(merged_result)
+            else:
+                logger.info(f"映像案件ではないためスキップ")
         
         logger.info(f"映像案件抽出完了: {len(results)}/{len(content_list)}件")
         return results
-```
