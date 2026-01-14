@@ -1,4 +1,4 @@
-"""Claude APIを使用したコンテンツ解析（厳格判定版）"""
+"""Claude APIを使用したコンテンツ解析（バランス版）"""
 
 import logging
 import json
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIAnalyzer:
-    """Claude APIによるコンテンツ解析クラス（厳格判定版）"""
+    """Claude APIによるコンテンツ解析クラス（バランス版）"""
     
     def __init__(self):
         api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -21,56 +21,55 @@ class AIAnalyzer:
             from anthropic import Anthropic
             self.client = Anthropic(api_key=api_key)
             self.model = "claude-3-5-sonnet-20241022"
-            logger.info("AIAnalyzer初期化完了（厳格判定版）")
+            logger.info("AIAnalyzer初期化完了（バランス版）")
         except ImportError:
             logger.error("anthropic パッケージが利用できません")
             raise
     
     def analyze_project(self, content_data: Dict) -> Optional[Dict]:
-        """案件コンテンツを解析（厳格版）"""
+        """案件コンテンツを解析（バランス版）"""
         title = content_data.get('title', '')
         content = content_data.get('content', '')
         url = content_data.get('url', '')
         
-        # コンテンツチェック
-        if not content or len(content.strip()) < 100:
-            logger.warning(f"コンテンツ不十分（{len(content)}文字）: {title[:50]}")
+        # 最低限のコンテンツチェック
+        if not content or len(content.strip()) < 50:
+            logger.debug(f"コンテンツ不十分（{len(content)}文字）: {title[:50]}")
             return None
         
-        # 明らかに関係ないキーワードで除外
-        exclude_keywords = [
-            '審査結果', '落札結果', '契約締結', '実績紹介', 
-            '事例紹介', '過去の', 'アーカイブ', 'セミナー',
-            'カフェ', '募集要項', '応募フォーム'
+        # 明確に除外すべきキーワード（結果発表など）
+        strong_exclude = [
+            '審査結果', '落札結果', '契約締結結果', '選定結果',
+            '受賞者', '入賞者', '結果について', '結果の公表'
         ]
         
         combined_text = title + ' ' + content[:500]
-        if any(keyword in combined_text for keyword in exclude_keywords):
-            logger.info(f"除外キーワード検出 → スキップ: {title[:50]}")
+        
+        if any(keyword in combined_text for keyword in strong_exclude):
+            logger.info(f"❌ 結果発表系 → 除外: {title[:50]}")
             return None
         
-        # 必須キーワードチェック（タイトルまたはコンテンツ）
-        required_keywords = ['映像', '動画', 'ビデオ', '撮影', 'プロモーション', 'PR', 'コンテンツ制作']
-        has_required = any(kw in combined_text for kw in required_keywords)
+        # 映像関連キーワード（広めに設定）
+        video_keywords = [
+            '映像', '動画', 'ビデオ', '撮影', 'プロモーション', 'PR',
+            '制作', '広報', 'Web', 'コンテンツ', '配信', 'SNS',
+            'YouTube', 'オンライン', '記録', 'デジタル'
+        ]
         
-        if not has_required:
-            logger.info(f"必須キーワードなし → スキップ: {title[:50]}")
+        # タイトルまたはコンテンツの冒頭500文字に1つでもあればOK
+        has_video_keyword = any(kw in combined_text for kw in video_keywords)
+        
+        if not has_video_keyword:
+            logger.debug(f"映像関連キーワードなし: {title[:50]}")
             return None
         
-        # 行政案件キーワードチェック
-        admin_keywords = ['入札', '公募', '調達', '委託', '募集', '業務', '契約']
-        has_admin = any(kw in combined_text for kw in admin_keywords)
-        
-        if not has_admin:
-            logger.info(f"行政案件キーワードなし → スキップ: {title[:50]}")
-            return None
+        logger.info(f"🎬 AI判定対象: {title[:50]}")
         
         # コンテンツを8000文字に制限
         if len(content) > 8000:
             content = content[:8000] + "\n...(省略)"
         
         # AI判定
-        logger.info(f"AI判定開始: {title[:50]}")
         prompt = self._build_prompt(title, content, url)
         
         try:
@@ -78,7 +77,7 @@ class AIAnalyzer:
                 model=self.model,
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
+                temperature=0.2
             )
             
             response_text = response.content[0].text
@@ -86,18 +85,35 @@ class AIAnalyzer:
             
             if result:
                 is_video = result.get('is_video_project', False)
-                logger.info(f"AI判定結果: {title[:30]}... → {is_video}")
+                
+                if is_video:
+                    logger.info(f"✅ AI判定: 映像案件 - {title[:40]}")
+                else:
+                    logger.info(f"⏭️  AI判定: 非該当 - {title[:40]}")
+                
                 return result if is_video else None
             
         except Exception as e:
             logger.error(f"AI解析エラー: {e}")
-            return None
+            
+            # エラー時は寛容に判定（タイトルに明確なキーワードがあれば採用）
+            priority_keywords = ['映像制作', '動画制作', 'ビデオ制作', '撮影業務']
+            if any(kw in title for kw in priority_keywords):
+                logger.info(f"✅ エラー時救済採用: {title[:50]}")
+                return {
+                    'is_video_project': True,
+                    'summary': f"{title}（エラー時判定）",
+                    'deadline': '不明',
+                    'application_url': url,
+                    'confidence': '低',
+                    'project_type': 'エラー時判定'
+                }
         
         return None
     
     def _build_prompt(self, title: str, content: str, url: str) -> str:
-        """プロンプト構築（厳格版）"""
-        return f"""以下の行政文書を厳密に分析してください。
+        """プロンプト構築（バランス版）"""
+        return f"""以下の行政文書を分析してください。
 
 **タイトル**: {title}
 **URL**: {url}
@@ -107,45 +123,41 @@ class AIAnalyzer:
 
 ---
 
-この文書が以下の条件を**すべて満たす**映像制作案件か判定してください：
+この文書が「映像制作・動画制作・撮影・編集などの発注案件」か判定してください。
 
-✅ **必須条件（すべて満たす必要あり）:**
-1. 映像制作・動画制作・撮影・編集などが**主要な業務内容**である
-2. 入札公告・公募・委託業務・調達案件など、**発注者が業者を募集している**
-3. まだ募集中、またはこれから募集する案件である
+✅ **該当する例:**
+- 観光PR映像の制作委託
+- イベント記録撮影業務
+- プロモーション動画制作
+- Web動画コンテンツ制作
+- 広報映像制作
 
-❌ **以下は必ず除外:**
-- 審査結果・落札結果・契約締結の発表
-- 過去の実績・事例の紹介
-- 完了した案件の報告書
-- イベント・セミナー・カフェの告知
-- 単なる情報提供・お知らせ
-- 映像視聴ページ・動画配信ページ
+❌ **該当しない例:**
+- 審査結果・落札結果の発表
+- 過去の実績紹介・事例紹介
+- 単なるイベント告知
+- 映像視聴ページ
 
-**厳格な判定基準:**
-- タイトルだけでなく、本文を必ず読んで判断する
-- 「映像制作」というキーワードがあっても、結果発表や事例紹介なら false
-- 少しでも疑わしい、または情報不足なら false
-- **確実に映像制作の発注案件のみ true**
+**判定基準:**
+- タイトルと本文を総合的に判断
+- 発注・委託・募集などの要素があるか
+- 迷ったら「該当する」寄りで判定（見逃さない）
 
-以下のJSON形式で回答してください:
+以下のJSON形式で回答:
 
 {{
   "is_video_project": true,
-  "summary": "発注する業務内容を具体的に（例：観光PR動画の企画・撮影・編集）",
-  "deadline": "YYYY-MM-DD形式の締切日（本文中に見つからない場合は'不明'）",
-  "application_url": "仕様書ダウンロードまたは申込ページのURL（なければ空文字）",
+  "summary": "業務内容を1-2行で（例：観光地紹介動画の企画・撮影・編集）",
+  "deadline": "YYYY-MM-DD または 不明",
+  "application_url": "",
   "confidence": "高/中/低",
-  "project_type": "具体的な案件種別（例：観光プロモーション映像制作）"
+  "project_type": "具体的な種別"
 }}
-
-JSON以外の文字は含めないでください。
 """
     
     def _parse_response(self, response_text: str) -> Optional[Dict]:
         """レスポンスからJSON抽出"""
         try:
-            # JSONブロック抽出
             json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
             if json_match:
                 json_str = json_match.group(1)
@@ -154,7 +166,6 @@ JSON以外の文字は含めないでください。
                 if json_match:
                     json_str = json_match.group(0)
                 else:
-                    logger.error("JSON形式が見つかりません")
                     return None
             
             result = json.loads(json_str)
@@ -168,31 +179,25 @@ JSON以外の文字は含めないでください。
             
             return result
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON解析エラー: {e}")
-            logger.debug(f"レスポンス内容: {response_text[:300]}")
-            return None
         except Exception as e:
-            logger.error(f"レスポンス処理エラー: {e}")
+            logger.error(f"JSON解析エラー: {e}")
             return None
     
     def batch_analyze(self, content_list: list) -> list:
         """複数コンテンツを一括解析"""
         results = []
         
-        logger.info(f"🎬 AI解析開始（厳格判定）: {len(content_list)}件を処理")
+        logger.info(f"🎬 AI解析開始（バランス版）: {len(content_list)}件を処理")
         
         for idx, content_data in enumerate(content_list, 1):
-            logger.info(f"📊 解析進捗: {idx}/{len(content_list)}")
+            if idx % 10 == 0:
+                logger.info(f"📊 解析進捗: {idx}/{len(content_list)}")
             
             analysis = self.analyze_project(content_data)
             
             if analysis and analysis.get('is_video_project'):
                 merged_result = {**content_data, **analysis}
                 results.append(merged_result)
-                logger.info(f"✅ 採用: {content_data.get('title', '')[:50]}")
-            else:
-                logger.debug(f"⏭️  スキップ: {content_data.get('title', '')[:50]}")
         
         logger.info(f"🎯 映像案件抽出完了: {len(results)}/{len(content_list)}件（採用率: {len(results)/len(content_list)*100:.1f}%）")
         return results
