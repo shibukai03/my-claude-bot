@@ -60,7 +60,7 @@ def main():
         logger.info("【ステップ2】コンテンツ抽出開始")
         
         all_contents = []
-        for idx, url_data in enumerate(all_urls[:50], 1):
+       for idx, url_data in enumerate(all_urls, 1):
             logger.info(f"抽出進捗: {idx}/{min(50, len(all_urls))}")
             
             extracted = extractor.extract(url_data['url'])
