@@ -58,19 +58,50 @@ def main():
         
         # ステップ2: コンテンツ抽出
         logger.info("【ステップ2】コンテンツ抽出開始")
+
+all_contents = []
+processed_urls = set()
+
+max_process = min(100, len(all_urls))
+for idx, url_data in enumerate(all_urls[:max_process], 1):
+    logger.info(f"抽出進捗: {idx}/{max_process}")
+    
+    url = url_data['url']
+    
+    # 既に処理済みならスキップ
+    if url in processed_urls:
+        continue
+    
+    processed_urls.add(url)
+    
+    # HTMLコンテンツ抽出
+    extracted = extractor.extract(url)
+    
+    if extracted:
+        extracted['prefecture'] = url_data['prefecture']
+        all_contents.append(extracted)
+        logger.info(f"✓ HTML抽出: {extracted['title'][:50]}")
         
-        all_contents = []
-       for idx, url_data in enumerate(all_urls, 1):
-            logger.info(f"抽出進捗: {idx}/{min(50, len(all_urls))}")
+        # PDFリンクも処理
+        pdf_links = extracted.get('pdf_links', [])
+        if pdf_links:
+            logger.info(f"  📄 PDF発見: {len(pdf_links)}件")
             
-            extracted = extractor.extract(url_data['url'])
-            
-            if extracted:
-                extracted['prefecture'] = url_data['prefecture']
-                all_contents.append(extracted)
-                logger.info(f"✓ {extracted['title'][:50]}")
-        
-        logger.info(f"コンテンツ抽出完了: {len(all_contents)}件")
+            for pdf_idx, pdf_url in enumerate(pdf_links[:3], 1):  # 最大3件
+                if pdf_url in processed_urls:
+                    continue
+                
+                processed_urls.add(pdf_url)
+                
+                logger.info(f"  📄 PDF抽出中 ({pdf_idx}/3): {pdf_url.split('/')[-1][:30]}")
+                pdf_content = extractor.extract(pdf_url)
+                
+                if pdf_content:
+                    pdf_content['prefecture'] = url_data['prefecture']
+                    all_contents.append(pdf_content)
+                    logger.info(f"  ✓ PDF抽出成功")
+
+logger.info(f"コンテンツ抽出完了: {len(all_contents)}件（HTML + PDF）")
         
         # ステップ3: AI解析
         if all_contents:
