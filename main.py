@@ -50,14 +50,14 @@ def main():
         analyzed_results = []
         processed_urls = set()
         
-        # 各都道府県をスクレイピング（最初の5県のみテスト）
-        test_prefectures = list(PREFECTURES.items())[:5]
+　　　　 # 全都道府県をスクレイピング
+　 　　　test_prefectures = list(PREFECTURES.items())
         
         for pref_name, pref_data in test_prefectures:
             logger.info(f"--- {pref_name} スクレイピング開始 ---")
             
             domain = pref_data['domain']
-            keywords = PRIMARY_KEYWORDS[:2]  # 最初の2キーワードのみ
+            keywords = PRIMARY_KEYWORDS + RELATED_KEYWORDS  # 全キーワード
             
             # URL検索
             search_results = search_prefecture_projects(domain, keywords, max_results=3)
@@ -67,7 +67,7 @@ def main():
                 continue
             
             # コンテンツ抽出
-            for result in search_results[:2]:  # 最大2件
+            for result in search_results[:5]:  # 最大5件
                 url = result['url']
                 
                 if url in processed_urls:
