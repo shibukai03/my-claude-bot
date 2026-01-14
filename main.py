@@ -1,6 +1,6 @@
 """
 行政映像案件スクレイピングシステム
-メインエントリーポイント
+メインエントリーポイント（直接スクレイピング版）
 """
 
 import logging
@@ -18,14 +18,12 @@ logger = logging.getLogger(__name__)
 def main():
     """メイン実行"""
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング開始")
+    logger.info("映像案件スクレイピング開始（直接スクレイピング方式）")
     logger.info("=" * 60)
     
     try:
         # モジュールインポート
-        from config.prefectures import PREFECTURES
-        from config.keywords import PRIMARY_KEYWORDS, RELATED_KEYWORDS
-        from scrapers.search_engine import search_prefecture_projects
+        from scrapers.direct_scraper import search_all_prefectures_direct
         from scrapers.content_extractor import ContentExtractor
         from analyzer.ai_analyzer import AIAnalyzer
         from database.sheets_manager import SheetsManager
@@ -45,61 +43,57 @@ def main():
         
         logger.info(f"スプレッドシート準備完了: {sheet_name}")
         
-        # 収集結果
-        all_results = []
-        analyzed_results = []
-        processed_urls = set()
+        # ステップ1: 直接スクレイピング
+        logger.info("【ステップ1】都道府県サイトから直接スクレイピング")
+        prefecture_results = search_all_prefectures_direct()
         
-        # 全都道府県をスクレイピング
-        all_prefectures = list(PREFECTURES.items())
+        # URLリストを平坦化
+        all_urls = []
+        for pref_name, results in prefecture_results.items():
+            for result in results:
+                result['prefecture'] = pref_name
+                all_urls.append(result)
         
-        for pref_name, pref_data in all_prefectures:
-            logger.info(f"--- {pref_name} スクレイピング開始 ---")
-            
-            domain = pref_data['domain']
-            keywords = PRIMARY_KEYWORDS + RELATED_KEYWORDS
-            
-            # URL検索
-            search_results = search_prefecture_projects(domain, keywords, max_results=5)
-            
-            if not search_results:
-                logger.info(f"{pref_name}: 検索結果なし")
-                continue
-            
-            # コンテンツ抽出
-            for result in search_results[:5]:
-                url = result['url']
-                
-                if url in processed_urls:
-                    continue
-                
-                processed_urls.add(url)
-                
-                extracted = extractor.extract(url)
-                
-                if extracted:
-                    extracted['prefecture'] = pref_name
-                    all_results.append(extracted)
-                    logger.info(f"✓ 抽出成功: {extracted['title'][:50]}")
+        logger.info(f"合計 {len(all_urls)} 件のURLを発見")
         
-        logger.info(f"スクレイピング完了: {len(all_results)}件")
+        # ステップ2: コンテンツ抽出
+        logger.info("【ステップ2】コンテンツ抽出開始")
         
-        # AI解析
-        if all_results:
-            logger.info("AI解析開始")
-            analyzed_results = analyzer.batch_analyze(all_results)
+        all_contents = []
+        for idx, url_data in enumerate(all_urls[:50], 1):
+            logger.info(f"抽出進捗: {idx}/{min(50, len(all_urls))}")
+            
+            extracted = extractor.extract(url_data['url'])
+            
+            if extracted:
+                extracted['prefecture'] = url_data['prefecture']
+                all_contents.append(extracted)
+                logger.info(f"✓ {extracted['title'][:50]}")
+        
+        logger.info(f"コンテンツ抽出完了: {len(all_contents)}件")
+        
+        # ステップ3: AI解析
+        if all_contents:
+            logger.info("【ステップ3】AI解析開始")
+            analyzed_results = analyzer.batch_analyze(all_contents)
             logger.info(f"映像案件抽出: {len(analyzed_results)}件")
+        else:
+            logger.warning("抽出されたコンテンツがありません")
+            analyzed_results = []
         
-        # スプレッドシートに保存
+        # ステップ4: スプレッドシートに保存
         if analyzed_results:
-            logger.info("スプレッドシート保存開始")
+            logger.info("【ステップ4】スプレッドシート保存開始")
             added = sheets_manager.append_projects(analyzed_results)
             logger.info(f"✓ 保存完了: {added}件追加")
+        else:
+            logger.warning("保存する映像案件がありません")
         
         # サマリー
         logger.info("=" * 60)
         logger.info("実行完了")
-        logger.info(f"スクレイピング: {len(all_results)}件")
+        logger.info(f"発見URL数: {len(all_urls)}件")
+        logger.info(f"コンテンツ抽出: {len(all_contents)}件")
         logger.info(f"映像案件: {len(analyzed_results)}件")
         logger.info("=" * 60)
         
