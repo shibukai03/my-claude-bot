@@ -1,4 +1,4 @@
-"""Claude APIを使用したコンテンツ解析（バランス版）"""
+"""Claude APIを使用したコンテンツ解析（バランス版・モデル修正）"""
 
 import logging
 import json
@@ -20,8 +20,8 @@ class AIAnalyzer:
         try:
             from anthropic import Anthropic
             self.client = Anthropic(api_key=api_key)
-            self.model = "claude-3-5-sonnet-20241022"
-            logger.info("AIAnalyzer初期化完了（バランス版）")
+            self.model = "claude-sonnet-4-20250514"  # ← 修正！最新モデル
+            logger.info(f"AIAnalyzer初期化完了（モデル: {self.model}）")
         except ImportError:
             logger.error("anthropic パッケージが利用できません")
             raise
