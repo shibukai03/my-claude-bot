@@ -1,6 +1,6 @@
 """
 行政映像案件スクレイピングシステム
-メインエントリーポイント（直接スクレイピング版）
+メインエントリーポイント（厳格判定 + PDF対応版）
 """
 
 import logging
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def main():
     """メイン実行"""
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング開始（直接スクレイピング方式）")
+    logger.info("映像案件スクレイピング開始（厳格判定 + PDF対応版）")
     logger.info("=" * 60)
     
     try:
@@ -56,56 +56,57 @@ def main():
         
         logger.info(f"合計 {len(all_urls)} 件のURLを発見")
         
-        # ステップ2: コンテンツ抽出
-        logger.info("【ステップ2】コンテンツ抽出開始")
-
-all_contents = []
-processed_urls = set()
-
-max_process = min(100, len(all_urls))
-for idx, url_data in enumerate(all_urls[:max_process], 1):
-    logger.info(f"抽出進捗: {idx}/{max_process}")
-    
-    url = url_data['url']
-    
-    # 既に処理済みならスキップ
-    if url in processed_urls:
-        continue
-    
-    processed_urls.add(url)
-    
-    # HTMLコンテンツ抽出
-    extracted = extractor.extract(url)
-    
-    if extracted:
-        extracted['prefecture'] = url_data['prefecture']
-        all_contents.append(extracted)
-        logger.info(f"✓ HTML抽出: {extracted['title'][:50]}")
+        # ステップ2: コンテンツ抽出（HTML + PDF）
+        logger.info("【ステップ2】コンテンツ抽出開始（HTML + PDF）")
         
-        # PDFリンクも処理
-        pdf_links = extracted.get('pdf_links', [])
-        if pdf_links:
-            logger.info(f"  📄 PDF発見: {len(pdf_links)}件")
+        all_contents = []
+        processed_urls = set()
+        
+        max_process = min(100, len(all_urls))
+        
+        for idx, url_data in enumerate(all_urls[:max_process], 1):
+            logger.info(f"抽出進捗: {idx}/{max_process}")
             
-            for pdf_idx, pdf_url in enumerate(pdf_links[:3], 1):  # 最大3件
-                if pdf_url in processed_urls:
-                    continue
+            url = url_data['url']
+            
+            # 既に処理済みならスキップ
+            if url in processed_urls:
+                continue
+            
+            processed_urls.add(url)
+            
+            # HTMLコンテンツ抽出
+            extracted = extractor.extract(url)
+            
+            if extracted:
+                extracted['prefecture'] = url_data['prefecture']
+                all_contents.append(extracted)
+                logger.info(f"✓ HTML抽出: {extracted['title'][:50]}")
                 
-                processed_urls.add(pdf_url)
-                
-                logger.info(f"  📄 PDF抽出中 ({pdf_idx}/3): {pdf_url.split('/')[-1][:30]}")
-                pdf_content = extractor.extract(pdf_url)
-                
-                if pdf_content:
-                    pdf_content['prefecture'] = url_data['prefecture']
-                    all_contents.append(pdf_content)
-                    logger.info(f"  ✓ PDF抽出成功")
-
-logger.info(f"コンテンツ抽出完了: {len(all_contents)}件（HTML + PDF）")
+                # PDFリンクも処理
+                pdf_links = extracted.get('pdf_links', [])
+                if pdf_links:
+                    logger.info(f"  📄 PDF発見: {len(pdf_links)}件")
+                    
+                    for pdf_idx, pdf_url in enumerate(pdf_links[:3], 1):
+                        if pdf_url in processed_urls:
+                            continue
+                        
+                        processed_urls.add(pdf_url)
+                        
+                        logger.info(f"  📄 PDF抽出中 ({pdf_idx}/3): {pdf_url.split('/')[-1][:30]}")
+                        pdf_content = extractor.extract(pdf_url)
+                        
+                        if pdf_content:
+                            pdf_content['prefecture'] = url_data['prefecture']
+                            all_contents.append(pdf_content)
+                            logger.info(f"  ✓ PDF抽出成功")
+        
+        logger.info(f"コンテンツ抽出完了: {len(all_contents)}件（HTML + PDF）")
         
         # ステップ3: AI解析
         if all_contents:
-            logger.info("【ステップ3】AI解析開始")
+            logger.info("【ステップ3】AI解析開始（厳格判定）")
             analyzed_results = analyzer.batch_analyze(all_contents)
             logger.info(f"映像案件抽出: {len(analyzed_results)}件")
         else:
@@ -124,8 +125,10 @@ logger.info(f"コンテンツ抽出完了: {len(all_contents)}件（HTML + PDF�
         logger.info("=" * 60)
         logger.info("実行完了")
         logger.info(f"発見URL数: {len(all_urls)}件")
-        logger.info(f"コンテンツ抽出: {len(all_contents)}件")
+        logger.info(f"コンテンツ抽出: {len(all_contents)}件（HTML + PDF）")
         logger.info(f"映像案件: {len(analyzed_results)}件")
+        if analyzed_results:
+            logger.info(f"採用率: {len(analyzed_results)/len(all_contents)*100:.1f}%")
         logger.info("=" * 60)
         
     except Exception as e:
