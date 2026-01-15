@@ -1,8 +1,9 @@
 name: 毎日9時に映像案件を自動収集
 
+
 on:
   schedule:
-     - cron: '0 0 * * *'
+    - cron: '0 0 * * *'  # 毎日 UTC 0:00 = 日本時間 9:00
   workflow_dispatch:  # 手動実行も可能
 
 jobs:
@@ -24,13 +25,14 @@ jobs:
           pip install -r requirements.txt
       
       - name: 🔐 Google認証ファイル作成
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: |
-          echo '${{ secrets.GCP_SERVICE_ACCOUNT }}' > credentials.json
+          echo "$GCP_SERVICE_ACCOUNT" > credentials.json
       
       - name: 🚀 ロボット起動
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_CREDENTIALS_FILE: credentials.json
-        run: |
-          python main.py
+        run: python main.py
