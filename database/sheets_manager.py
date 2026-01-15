@@ -102,7 +102,7 @@ class SheetsManager:
         rows_to_add = []
         for project in new_projects:
             row = [
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M"),
                 project.get('prefecture', ''),
                 project.get('title', '')[:200],
                 project.get('summary', '')[:300],
