@@ -2,7 +2,7 @@ name: 毎日9時に映像案件を自動収集
 
 on:
   schedule:
-    - cron: '48 2 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 jobs:
