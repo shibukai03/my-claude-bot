@@ -119,7 +119,7 @@ class AIAnalyzer:
 **URL**: {url}
 
 **本文（抜粋）**:
-{content[:1500]}
+{content[:2000]}
 
 ---
 
@@ -146,10 +146,10 @@ class AIAnalyzer:
 以下のJSON形式で回答:
 
 {{
-  "is_video_project": true,
+ "is_video_project": true,
   "summary": "業務内容を1-2行で（例：観光地紹介動画の企画・撮影・編集）",
   "deadline": "YYYY-MM-DD または 不明",
-  "application_url": "",
+  "application_url": "申込フォームURL、仕様書ダウンロードURL、または問い合わせページURL（本文中に明記されている場合のみ）",
   "confidence": "高/中/低",
   "project_type": "具体的な種別"
 }}
