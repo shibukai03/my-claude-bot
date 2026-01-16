@@ -1,4 +1,4 @@
-"""Claude APIを使用したコンテンツ解析（ねじれ解消・日付厳格版）"""
+"""Claude APIを使用したコンテンツ解析（2026年最新モデル対応版）"""
 
 import logging
 import json
@@ -17,8 +17,8 @@ class AIAnalyzer:
         try:
             from anthropic import Anthropic
             self.client = Anthropic(api_key=api_key)
-            # 安定性の高い最新モデルを指定
-            self.model = "claude-3-5-sonnet-20240620" 
+            # --- ここを修正：2026年環境で動作する最新モデル名に戻しました ---
+            self.model = os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-4-20250514')
             logger.info(f"AIAnalyzer初期化完了（モデル: {self.model}）")
         except ImportError:
             logger.error("anthropic パッケージが利用できません")
@@ -33,7 +33,6 @@ class AIAnalyzer:
         if not content or len(content.strip()) < 50:
             return None
         
-        # 判定
         prompt = self._build_prompt(title, content, url)
         
         try:
@@ -41,16 +40,14 @@ class AIAnalyzer:
                 model=self.model,
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1 # 精度重視のため低めに設定
+                temperature=0.1
             )
             
             response_text = response.content[0].text
             result = self._parse_response(response_text)
             
-            if result:
-                # AI判定がTrueの場合のみ返す
-                if result.get('is_video_project'):
-                    return result
+            if result and result.get('is_video_project'):
+                return result
             
         except Exception as e:
             logger.error(f"AI解析エラー: {e}")
@@ -101,11 +98,9 @@ class AIAnalyzer:
 
     def batch_analyze(self, content_list: list) -> list:
         results = []
-        logger.info(f"🎬 AI解析開始: {len(content_list)}件を処理")
         for content_data in content_list:
             analysis = self.analyze_project(content_data)
             if analysis:
-                # 元のURL情報などをマージ
                 analysis['url'] = content_data.get('url')
                 results.append(analysis)
         return results
