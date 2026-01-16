@@ -1,15 +1,16 @@
-"""都道府県の入札情報ページを直接スクレイピング"""
+"""都道府県の入札情報ページを直接スクレイピング（404エラー時のGoogle検索救済機能付き）"""
 
 import requests
 from bs4 import BeautifulSoup
 import logging
 from typing import List, Dict
 import time
+import os
+from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
 
-
-# 各都道府県の入札情報ページURL
+# 全47都道府県の最新URLリスト（静的な入り口）
 PREFECTURE_BID_PAGES = {
     "北海道": "https://www.pref.hokkaido.lg.jp/sm/sum/nyusatsu/index.html",
     "青森県": "https://www.pref.aomori.lg.jp/sangyo/build/nyusatsu_jouhou.html",
@@ -60,94 +61,98 @@ PREFECTURE_BID_PAGES = {
     "沖縄県": "https://www.pref.okinawa.jp/site/somu/kaikei/nyusatsu/"
 }
 
+def get_latest_urls_via_google(pref_name: str) -> List[str]:
+    """【新機能】Google検索を使って最新の入札ページURLを探す"""
+    api_key = os.getenv('GOOGLE_API_KEY')
+    cx = os.getenv('CUSTOM_SEARCH_ENGINE_ID')
+    
+    if not api_key or not cx:
+        logger.warning(f"{pref_name}: Google APIキーまたはCX IDが設定されていません。検索をスキップします。")
+        return []
+
+    # 検索クエリ： 「〇〇県 映像制作 入札 公募」
+    query = f"{pref_name} 映像制作 入札 公募 site:pref.*.lg.jp"
+    search_url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        'key': api_key,
+        'cx': cx,
+        'q': query,
+        'num': 3  # 上位3件を取得
+    }
+
+    try:
+        response = requests.get(search_url, params=params, timeout=10)
+        response.raise_for_status()
+        search_results = response.json()
+        links = [item['link'] for item in search_results.get('items', [])]
+        logger.info(f"{pref_name}: Google検索により {len(links)} 件の新しい候補URLを発見")
+        return links
+    except Exception as e:
+        logger.error(f"{pref_name}: Google検索エラー - {e}")
+        return []
 
 def scrape_prefecture_page(pref_name: str, url: str) -> List[Dict]:
-    """都道府県の入札ページから映像制作関連の情報を取得"""
-    
-    # 映像制作関連のキーワード
-    keywords = [
-        '映像', '動画', 'ビデオ', 'プロモーション', 'PR', 
-        '広報', '撮影', 'コンテンツ', '制作', '配信',
-        'YouTube', 'SNS', 'Web'
-    ]
+    """特定のURLから映像制作関連のリンクを抽出する（中身のロジックは維持）"""
+    keywords = ['映像', '動画', 'ビデオ', 'プロモーション', 'PR', '広報', '撮影', '制作', '配信']
     
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        logger.info(f"{pref_name}: 調査対象URL -> {url}")
         
-        logger.info(f"{pref_name}: {url} にアクセス中...")
-        
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=20)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.content, 'html.parser')
-        
         results = []
         seen_urls = set()
         
-        # 全てのリンクを取得
         for link in soup.find_all('a', href=True):
             href = link['href']
             text = link.get_text(strip=True)
-            
-            # 親要素のテキストも取得
-            parent_text = ''
-            if link.parent:
-                parent_text = link.parent.get_text(strip=True)
-            
+            parent_text = link.parent.get_text(strip=True) if link.parent else ''
             combined_text = text + ' ' + parent_text
             
-            # キーワードチェック
             if any(keyword in combined_text for keyword in keywords):
-                # 相対URLを絶対URLに変換
-                from urllib.parse import urljoin
                 absolute_url = urljoin(url, href)
-                
-                # 重複チェック
                 if absolute_url not in seen_urls:
                     seen_urls.add(absolute_url)
-                    
                     results.append({
                         'title': text if text else '（タイトルなし）',
                         'url': absolute_url,
                         'snippet': combined_text[:200]
                     })
-        
-        logger.info(f"{pref_name}: {len(results)}件の映像関連リンク発見")
         return results
-        
-    except requests.Timeout:
-        logger.warning(f"{pref_name}: タイムアウト")
-        return []
-    except requests.RequestException as e:
-        logger.error(f"{pref_name}: アクセスエラー - {e}")
-        return []
     except Exception as e:
-        logger.error(f"{pref_name}: 予期しないエラー - {e}")
+        logger.warning(f"{pref_name}: このURLの解析に失敗しました ({url}) - {e}")
         return []
-
 
 def search_all_prefectures_direct(max_prefectures=None) -> Dict[str, List[Dict]]:
-    """全都道府県を直接スクレイピング"""
-    
+    """【改良版】全都道府県を巡回し、必要に応じてGoogle検索で補完する"""
     all_results = {}
-    
     items = list(PREFECTURE_BID_PAGES.items())
     if max_prefectures:
         items = items[:max_prefectures]
     
-    for pref_name, url in items:
-        logger.info(f"--- {pref_name} 直接スクレイピング開始 ---")
+    for pref_name, default_url in items:
+        logger.info(f"--- {pref_name} 調査開始 ---")
         
-        results = scrape_prefecture_page(pref_name, url)
+        # 1. まずは固定URLを試す
+        results = scrape_prefecture_page(pref_name, default_url)
+        
+        # 2. もし固定URLで何も見つからない、またはエラーだった場合、Google検索を発動
+        if not results:
+            logger.info(f"{pref_name}: 固定URLで成果なし。Google検索APIで救済措置を実行します...")
+            fallback_urls = get_latest_urls_via_google(pref_name)
+            
+            for fb_url in fallback_urls:
+                fb_results = scrape_prefecture_page(pref_name, fb_url)
+                results.extend(fb_results)
+                if fb_results:
+                    logger.info(f"{pref_name}: Googleが見つけたURLから {len(fb_results)} 件の情報を取得成功！")
+        
         all_results[pref_name] = results
-        
-        # レート制限対策
-        time.sleep(2)
+        time.sleep(2)  # サーバーに優しく
     
-    # 統計情報
     total_links = sum(len(results) for results in all_results.values())
-    logger.info(f"直接スクレイピング完了: 合計{total_links}件のリンク取得")
-    
+    logger.info(f"ハイブリッド・スクレイピング完了: 合計{total_links}件のリンク取得")
     return all_results
