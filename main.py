@@ -5,127 +5,96 @@
 
 import logging
 import sys
-import os
 from datetime import datetime
 
 # ロギング設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
 def main():
-    """メイン実行"""
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング開始（精度向上・不明案件キープ版）")
+    logger.info("映像案件スクレイピング開始（要件完全準拠版）")
     logger.info("=" * 60)
     
     try:
-        # モジュールインポート
         from scrapers.direct_scraper import search_all_prefectures_direct
         from scrapers.content_extractor import ContentExtractor
         from analyzer.ai_analyzer import AIAnalyzer
         from database.sheets_manager import SheetsManager
         
-        # 本日の日付（過去案件の判定用）
-        today = datetime.now().date()
-        
-        # 初期化
+        # 準備
         extractor = ContentExtractor()
         analyzer = AIAnalyzer()
         sheets_manager = SheetsManager()
+        today = datetime.now().date() # 2026-01-16
+        today_str = today.strftime('%Y-%m-%d')
         
-        logger.info("初期化完了")
-        
-        # スプレッドシート準備
+        # スプレッドシートを開く
         sheet_name = sheets_manager.create_monthly_sheet()
         sheets_manager.open_sheet(sheet_name)
         
-        # ステップ1: スクレイピング実行
-        logger.info("【ステップ1】データ収集開始")
+        # 1. データ収集
         prefecture_results = search_all_prefectures_direct()
-        
-        all_urls = []
-        for pref_name, results in prefecture_results.items():
-            for result in results:
-                # 検索時のラベル（都道府県）を一旦セット
-                result['search_label'] = pref_name
-                all_urls.append(result)
-        
-        logger.info(f"合計 {len(all_urls)} 件のURLを発見")
-        
-        # ステップ2 & 3: 解析とフィルタリング
-        logger.info("【ステップ2/3】解析・フィルタリング開始（最大100件）")
+        all_urls = [r for results in prefecture_results.values() for r in results]
+        logger.info(f"合計 {len(all_urls)} 件の候補URLを発見")
         
         final_valid_projects = []
         processed_urls = set()
         
-        # AI費用と時間のバランスのため100件に制限
-        max_process = min(100, len(all_urls))
-        
-        for idx, url_data in enumerate(all_urls[:max_process], 1):
+        # 2. 解析と選別（最大100件）
+        for url_data in all_urls[:100]:
             url = url_data['url']
             if url in processed_urls: continue
             processed_urls.add(url)
             
-            # コンテンツ抽出
-            extracted = extractor.extract(url)
-            if not extracted: continue
+            content = extractor.extract(url)
+            if not content: continue
             
-            # AI解析（正しい県名と締切をAIに判断させる）
-            # ※ analyzer.analyze_project は、映像案件でなければ None を返します
-            analysis_result = analyzer.analyze_project(extracted)
+            # AI判定
+            analysis = analyzer.analyze_project(content)
             
-            if analysis_result:
-                deadline_str = analysis_result.get('deadline', '不明')
+            if analysis:
+                deadline = analysis.get('deadline', '不明')
                 
-                # --- 日付フィルタの適用 ---
-                is_valid_date = False
-                
-                # 1. 締切が「不明」なら、チャンスを逃さないためキープ！
-                if deadline_str == "不明":
-                    logger.info(f"✅ 不明案件をキープ: [{analysis_result.get('prefecture', '不明')}] {analysis_result['title']}")
-                    is_valid_date = True
-                
-                # 2. 日付がある場合、今日以降ならキープ、過去なら捨てる
+                # --- 日付フィルタロジック ---
+                is_valid = False
+                if deadline == "不明":
+                    is_valid = True # 要件：不明案件も残す
                 else:
                     try:
-                        deadline_date = datetime.strptime(deadline_str, '%Y-%m-%d').date()
+                        # 締切日が今日以降なら有効
+                        deadline_date = datetime.strptime(deadline, '%Y-%m-%d').date()
                         if deadline_date >= today:
-                            logger.info(f"✨ 有効案件発見: [{analysis_result.get('prefecture', '不明')}] {analysis_result['title']} (締切:{deadline_str})")
-                            is_valid_date = True
+                            is_valid = True
                         else:
-                            logger.info(f"⏭️ 過去案件のため除外: {analysis_result['title']} (締切:{deadline_str})")
+                            logger.info(f"⏭️ 過去案件除外: {analysis['title']} ({deadline})")
                     except:
-                        # 日付の形式が読み取れない場合も、念のため残す
-                        logger.info(f"✅ 形式不明につきキープ: {analysis_result['title']}")
-                        is_valid_date = True
+                        is_valid = True # 日付形式が異常な場合も念のため残す
+                
+                if is_valid:
+                    # 要件2：[取得日, 都道府県, 案件名, 要約, 期限, 元URL, 申込URL] の形に整理
+                    final_data = {
+                        'date': today_str,
+                        'prefecture': analysis['prefecture'],
+                        'title': analysis['title'],
+                        'summary': analysis['summary'],
+                        'deadline': deadline,
+                        'source_url': url,
+                        'application_url': analysis['application_url']
+                    }
+                    final_valid_projects.append(final_data)
+                    logger.info(f"✅ 合格: [{analysis['prefecture']}] {analysis['title']}")
 
-                if is_valid_date:
-                    # AIが特定した正しい県名をスプレッドシートに書き込むため、データを保持
-                    # 以前のコードと互換性を持たせるためにurlをセット
-                    analysis_result['url'] = url
-                    final_valid_projects.append(analysis_result)
-
-        # ステップ4: スプレッドシートに保存
+        # 3. スプレッドシート保存
         if final_valid_projects:
-            logger.info(f"【ステップ4】スプレッドシート保存開始 ({len(final_valid_projects)}件)")
-            # 重複除外機能付きの append_projects を使用
+            # 重複URLチェックは sheets_manager 側で実行
             added = sheets_manager.append_projects(final_valid_projects)
-            logger.info(f"✓ 保存完了: {added}件を新規追加しました")
+            logger.info(f"✓ 完了: {added} 件の新着案件を保存しました")
         else:
-            logger.warning("本日保存すべき有効な案件は見つかりませんでした")
+            logger.info("保存対象の案件はありませんでした")
             
-        # サマリー
-        logger.info("=" * 60)
-        logger.info("全工程終了")
-        logger.info(f"発見: {len(all_urls)}件 / 解析対象: {max_process}件 / 採用: {len(final_valid_projects)}件")
-        logger.info("=" * 60)
-        
     except Exception as e:
-        logger.error(f"システムエラー発生: {e}", exc_info=True)
+        logger.error(f"システムエラー: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
