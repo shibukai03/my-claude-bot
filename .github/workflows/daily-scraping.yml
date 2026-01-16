@@ -36,4 +36,5 @@ jobs:
           GOOGLE_CREDENTIALS_FILE: credentials.json
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           CUSTOM_SEARCH_ENGINE_ID: ${{ secrets.CUSTOM_SEARCH_ENGINE_ID }}
+          ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}
         run: python main.py
