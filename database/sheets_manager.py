@@ -99,7 +99,7 @@ class SheetsManager:
             
             # 要件2：[取得日, 都道府県, 案件名, 要約, 期限, 元URL, 申込URL]
             row = [
-                p.get('date', datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")),
+                p.get('date', datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")),
                 p.get('prefecture', ''),
                 p.get('title', '')[:200],
                 p.get('summary', '')[:500],
