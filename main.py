@@ -1,6 +1,6 @@
 """
 行政映像案件スクレイピングシステム
-メインエントリーポイント（日本時間修正版）
+メインエントリーポイント（総数表示 ＋ 日本時間修正版）
 """
 
 import logging
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング開始（日本時間修正版）")
+    logger.info("映像案件スクレイピング開始（日本時間 ＋ 発見総数表示版）")
     logger.info("=" * 60)
     
     try:
@@ -26,26 +26,31 @@ def main():
         analyzer = AIAnalyzer()
         sheets_manager = SheetsManager()
         
-        # --- 日本時間 (JST) の取得設定 ---
+        # --- 1. 日本時間 (JST) の取得設定 ---
         jst = timezone(timedelta(hours=9))
         now_jst = datetime.now(jst)
-        
-        # スプレッドシート記録用の時刻文字列 (JST)
         now_str = now_jst.strftime('%Y-%m-%d %H:%M')
-        # 日付判定用の今日の日付 (JST)
         today = now_jst.date()
         
         sheet_name = sheets_manager.create_monthly_sheet()
         sheets_manager.open_sheet(sheet_name)
         
+        # --- 2. 調査の実行 ---
         prefecture_results = search_all_prefectures_direct()
-        # 全リンクをリスト化
+        
+        # 全リンクをひとつのリストにまとめる
         all_urls = [r for results in prefecture_results.values() for r in results]
+        
+        # --- 【追加】発見した総件数をログに表示 ---
+        logger.info(f"全国47都道府県の調査が完了しました。")
+        logger.info(f">>> 発見した総リンク数: {len(all_urls)} 件")
+        logger.info(f"このうち上位100件をAIで精査します。")
+        # ----------------------------------------
         
         final_valid_projects = []
         processed_urls = set()
         
-        # ご要望通り、単純な上位100件の解析を維持
+        # 解析（上位100件）
         for url_data in all_urls[:100]:
             url = url_data['url']
             if url in processed_urls: continue
@@ -71,7 +76,7 @@ def main():
                 
                 if is_valid:
                     final_data = {
-                        'date': now_str, # 日本時間がセットされます
+                        'date': now_str, # 日本時間での記録
                         'prefecture': analysis['prefecture'],
                         'title': analysis['title'],
                         'summary': analysis['summary'],
@@ -84,7 +89,9 @@ def main():
 
         if final_valid_projects:
             added = sheets_manager.append_projects(final_valid_projects)
-            logger.info(f"✓ 完了: {added} 件保存完了")
+            logger.info(f"✓ 完了: {added} 件の新規案件をスプレッドシートに保存しました")
+        else:
+            logger.info("保存対象の新しい案件は見つかりませんでした")
             
     except Exception as e:
         logger.error(f"システムエラー: {e}")
