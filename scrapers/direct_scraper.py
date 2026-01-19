@@ -81,7 +81,7 @@ def get_latest_urls_via_google(pref_name: str) -> List[str]:
         return []
 
 def scrape_prefecture_page(pref_name: str, url: str) -> List[Dict]:
-    keywords = ['映像', '動画', 'ビデオ', 'プロモーション', 'PR', '広報', '撮影', '制作', '配信']
+    keywords = ['映像', '動画', 'プロモーション', 'デジタルコンテンツ', '撮影', '配信', 'PR']
     try:
         logger.info(f"{pref_name}: 調査開始 -> {url}")
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
