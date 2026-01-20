@@ -1,74 +1,85 @@
 import logging
-import os
 import json
+import os
+import re
 import time
-from anthropic import Anthropic
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 class AIAnalyzer:
     def __init__(self):
-        # APIキーをgetenvで取得（GitHub Secretsの ANTHROPIC_API_KEY を使用）
+        # 以前のコードと同じ環境変数の読み込み方式
         api_key = os.getenv('ANTHROPIC_API_KEY')
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY が設定されていません")
+        
+        from anthropic import Anthropic
         self.client = Anthropic(api_key=api_key)
-        
-        # モデル名は変数を介さず、確実に存在する正式IDを直接指定します
-        # これにより 404 Not Found エラーを完全に防ぎます
-        self.model = "claude-3-5-sonnet-20241022"
-        
-        logger.info(f"AI解析ユニット起動中... (Model: {self.model})")
+        # GitHub Secrets の設定を優先し、なければ Sonnet を使用
+        self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022')
+        logger.info(f"AI解析ユニット初期化完了（モデル: {self.model}）")
 
-    def analyze_project(self, content_data):
-        # 取得データの正規化
-        text = ""
-        if isinstance(content_data, dict):
-            text = content_data.get('text') or content_data.get('content') or ""
-        elif isinstance(content_data, str):
-            text = content_data
+    def analyze_project(self, content_data: Dict) -> Optional[Dict]:
+        """案件を解析し、v1.2の要件に基づいた情報を抽出する"""
+        title = content_data.get('title', '')
+        # content または text どちらからでも取得できるように修正
+        content = content_data.get('content') or content_data.get('text') or ''
+        url = content_data.get('url', '')
 
-        if not text or len(text.strip()) < 10:
-            logger.warning("AI解析スキップ: テキスト内容が不十分です。")
+        if not content or len(content.strip()) < 50:
             return None
 
-        system_prompt = """
-あなたは自治体の調達情報を精査するリサーチアナリストです。
-提示されたテキストから「映像制作・動画制作・配信・撮影」に関する募集中案件を特定し、
-以下のJSON形式で回答してください。
+        # 指示書 v1.2 の内容を「以前のコード」と同じ形式のプロンプトに統合
+        prompt = f"""あなたは公的機関の映像制作案件を精査するリサーチアナリストです。
+以下のテキストを分析し、指定のJSON形式で回答してください。推測は禁止です。
 
-【ラベリング基準】
-A：確定（動画制作が必須。尺・本数・工程が明確）
-B：候補（動画が含まれる可能性が高いが、必須と断定できない）
-C：除外（募集終了、結果発表、物品購入、動画要件なし）
+**解析対象タイトル**: {title}
+**本文（抜粋）**: {content[:5000]}
 
-【出力形式】
-JSON形式でのみ回答。
-{
-  "label": "A",
-  "title": "件名",
-  "prefecture": "都道府県/市区町村名",
+---
+【判定・抽出ルール (v1.2)】
+1. **ラベリング**: 
+   - A：確定（動画制作が必須。尺・本数・工程が明確）
+   - B：候補（動画が含まれる可能性が高いが、必須と断定できない）
+   - C：除外（募集終了、結果発表、物品購入、動画要件なし）
+2. **証拠(Evidence)**: なぜそのラベルにしたのか、本文から短い証拠文言を引用してください。
+3. **都道府県**: 発注している都道府県/市区町村名を特定。
+4. **予算・締切**: 予定価格、参加申込締切(YYYY-MM-DD)等を抽出。不明なら「不明」。
+
+以下のJSON形式でのみ回答してください:
+{{
+  "label": "A, B, または C",
+  "title": "正確な案件名",
+  "prefecture": "都道府県名",
   "method": "入札/プロポ等",
   "budget": "予定価格/上限",
   "period": "履行期間",
-  "deadline_app": "参加申込締切(YYYY-MM-DD)",
-  "deadline_ques": "質問締切(YYYY-MM-DD)",
-  "deadline_prop": "提案書提出締切(YYYY-MM-DD)",
-  "application_url": "申込先URL",
-  "evidence": "映像要件の根拠(引用)",
-  "tag": "ジャンル",
-  "memo": "特記事項"
-}
+  "deadline_app": "YYYY-MM-DD",
+  "deadline_ques": "YYYY-MM-DD",
+  "deadline_prop": "YYYY-MM-DD",
+  "evidence": "映像要件の根拠(短い引用)",
+  "tag": "観光PR/採用等",
+  "memo": "B判定理由など"
+}}
 """
         try:
-            # AIへのリクエスト実行
-            message = self.client.messages.create(
+            # 以前のコードと同じ API 呼び出し構造
+            response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": f"解析対象:\n\n{text[:12000]}"}]
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1
             )
-            return json.loads(message.content[0].text)
+            
+            res_text = response.content[0].text
+            json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group(0))
+                # 申込先URLを追加
+                result['source_url'] = url
+                return result
+            return None
         except Exception as e:
-            logger.error(f"解析エラー詳細: {e}")
-            # 連続エラーを避けるための短い待機
-            time.sleep(2)
+            logger.error(f"AI解析エラー: {e}")
             return None
