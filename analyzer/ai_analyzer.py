@@ -6,26 +6,29 @@ logger = logging.getLogger(__name__)
 
 class AIAnalyzer:
     def __init__(self):
-        # APIキーは環境変数から読み込まれます
         self.client = Anthropic()
-        # 高精度なSonnetモデルを使用
         self.model = "claude-3-5-sonnet-20240620"
 
-    def analyze_project(self, text):
+    def analyze_project(self, content_data):
+        # content_dataが辞書形式（{'text': '...', 'url': '...'}）の場合、テキスト部分のみ抽出
+        if isinstance(content_data, dict):
+            text = content_data.get('text', '')
+        else:
+            text = str(content_data)
+
+        if not text or len(text.strip()) < 10:
+            return None
+
         system_prompt = """
 あなたは「官公庁・自治体の調達情報を収集し、映像制作に関わる募集中案件を抽出・整理するリサーチアナリスト」です。
-推測・憶測を排し、公告本文や仕様書に基づき、以下の基準で判定してください。
+推測を排し、以下の【ラベリング基準】に従い、JSON形式でのみ回答してください。
 
 【ラベリング基準】
 A：確定（動画制作が必須。尺・本数・工程が明確）
-B：候補（動画が含まれる可能性が高いが、必須と断定できない/評価項目で示唆）
-C：除外（除外条件に該当、または動画要件が確認できない/募集終了）
-
-【除外条件】
-物品調達、広告枠買い、Webサイト制作のみ、イベント運営のみ、写真のみ。
+B：候補（動画が含まれる可能性が高いが、必須と断定できない）
+C：除外（募集終了、物品購入、広告枠買い、動画要件なし、結果発表）
 
 【出力形式】
-必ず以下のJSON形式でのみ回答してください。
 {
   "label": "A",
   "title": "件名",
@@ -43,13 +46,16 @@ C：除外（除外条件に該当、または動画要件が確認できない/
 }
 """
         try:
+            # 安全にテキストを10000文字までに制限
+            safe_text = text[:10000]
+            
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
                 system=system_prompt,
-                messages=[{"role": "user", "content": f"以下のテキストを解析してください:\n\n{text[:10000]}"}]
+                messages=[{"role": "user", "content": f"以下のテキストを解析してください:\n\n{safe_text}"}]
             )
             return json.loads(message.content[0].text)
         except Exception as e:
-            logger.error(f"AI解析エラー: {e}")
+            logger.error(f"AI解析エラー詳細: {e}")
             return None
