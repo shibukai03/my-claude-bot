@@ -12,53 +12,53 @@ logger = logging.getLogger(__name__)
 
 # URLリストは現在の正常なものを維持
 PREFECTURE_BID_PAGES = {
-    "北海道": "https://www.pref.hokkaido.lg.jp/kz/gxs/gx-contr/",
-    "青森県": "https://www.pref.aomori.lg.jp/kensei/koho/",
-    "岩手県": "https://www.pref.iwate.jp/kensei/nyusatsu/",
-    "宮城県": "https://www.pref.miyagi.jp/soshiki/keiyaku/kst.html",
-    "秋田県": "https://www.pref.akita.lg.jp/pages/genre/12231",
-    "山形県": "https://www.pref.yamagata.jp/kurashi/nyusatsu/",
-    "福島県": "https://www.pref.fukushima.lg.jp/sec/298/bidding-info.html",
-    "茨城県": "https://www.pref.ibaraki.jp/yousiki/nyusatsu/",
+    "北海道": "https://www.pref.hokkaido.lg.jp/sk/chotatsu/keiyakujoho/index.html", # 出納局(全庁)
+    "青森県": "https://www.pref.aomori.lg.jp/kensei/nyusatsu/itaku_nyusatsu.html", # 委託・役務窓口
+    "岩手県": "https://www.pref.iwate.jp/kensei/nyusatsu/itaku/index.html",
+    "宮城県": "https://www.pref.miyagi.jp/site/nyusatsu/itaku-index.html",
+    "秋田県": "https://www.pref.akita.lg.jp/pages/genre/14763", # 業務委託
+    "山形県": "https://www.pref.yamagata.jp/kurashi/nyusatsu/index.html",
+    "福島県": "https://www.pref.fukushima.lg.jp/sec/01115c/nyusatsu-1.html", # 役務・委託
+    "茨城県": "https://www.pref.ibaraki.jp/yousiki/nyusatsu/index.html",
     "栃木県": "https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-itaku/index.html",
-    "群馬県": "https://www.pref.gunma.jp/page/6249.html",
-    "埼玉県": "https://www.pref.saitama.lg.jp/a0501/r7eizou-itaku.html",
-    "千葉県": "https://www.pref.chiba.lg.jp/nyuu-kei/buppin-itaku/nyuusatsukoukoku/index.html",
+    "群馬県": "https://www.pref.gunma.jp/page/nyusatsu-itaku.html",
+    "埼玉県": "https://www.pref.saitama.lg.jp/a0212/buppin/index.html",
+    "千葉県": "https://www.pref.chiba.lg.jp/nyuu-kei/buppin-itaku/index.html",
     "東京都": "https://www.e-procurement.metro.tokyo.lg.jp/index.jsp",
     "神奈川県": "https://www.pref.kanagawa.jp/docs/r5k/cnt/f5681/",
-    "新潟県": "https://www.pref.niigata.lg.jp/sec/shukei/1356837194058.html",
-    "富山県": "https://www.pref.toyama.lg.jp/sangyo/nyusatsu/",
-    "石川県": "https://www.pref.ishikawa.lg.jp/kankou/hokurikupromotion/r7hokurikumonogatariproposal.html",
-    "福井県": "https://www.pref.fukui.lg.jp/kenkei/doc/kenkei/naka10.html",
-    "山梨県": "https://www.pref.yamanashi.jp/kanri/nyusatsu/",
-    "長野県": "https://www.pref.nagano.lg.jp/kensa/puropo-kokoku.html",
-    "岐阜県": "https://www.pref.gifu.lg.jp/bid/search/search.php?sec02=2&sec01=3&search=1",
-    "静岡県": "https://www.pref.shizuoka.jp/soumu/so-310/nyusatsu/",
-    "愛知県": "https://www.pref.aichi.jp/soshiki/shukei/nyusatsu.html",
-    "三重県": "https://www.pref.mie.lg.jp/app/nyusatsu/list/00015927",
-    "滋賀県": "https://www.pref.shiga.lg.jp/kensei/koho/e-shinbun/bosyuu/344224.html",
+    "新潟県": "https://www.pref.niigata.lg.jp/site/nyusatsu/",
+    "富山県": "https://www.pref.toyama.lg.jp/sangyo/nyusatsu/index.html",
+    "石川県": "https://www.pref.ishikawa.lg.jp/zaisei/nyusatsu_index.html",
+    "福井県": "https://www.pref.fukui.lg.jp/kurashi/nyusatsu/index.html",
+    "山梨県": "https://www.pref.yamanashi.jp/kanri/itaku_nyusatsu.html",
+    "長野県": "https://www.pref.nagano.lg.jp/kensa/nyusatsu/index.html",
+    "岐阜県": "https://www.pref.gifu.lg.jp/site/bid/",
+    "静岡県": "https://www.pref.shizuoka.jp/kensei/nyusatsu/index.html",
+    "愛知県": "https://www.pref.aichi.jp/soshiki/shukei/nyusatsu-info.html",
+    "三重県": "https://www.pref.mie.lg.jp/NYUSATSU/index.htm",
+    "滋賀県": "https://www.pref.shiga.lg.jp/kensei/nyusatsu/",
     "京都府": "https://www.pref.kyoto.jp/zaisei/nyuusatu.html",
-    "大阪府": "https://www.pref.osaka.lg.jp/o040100/keiyaku_2/e-nyuusatsu/puropo.html",
-    "兵庫県": "https://web.pref.hyogo.lg.jp/kobo_boshu/area/index.html",
+    "大阪府": "https://www.pref.osaka.lg.jp/keiyakuchotatsu/index.html",
+    "兵庫県": "https://web.pref.hyogo.lg.jp/kobo_boshu/index.html",
     "奈良県": "https://www.pref.nara.jp/10553.htm",
     "和歌山県": "https://www.pref.wakayama.lg.jp/prefg/020100/index.html",
-    "鳥取県": "https://www.pref.tottori.lg.jp/1326.htm",
-    "島根県": "https://www.pref.shimane.lg.jp/bid_info/bid_kanko/",
+    "鳥取県": "https://www.pref.tottori.lg.jp/keiyaku/",
+    "島根県": "https://www.pref.shimane.lg.jp/bid_info/",
     "岡山県": "https://www.pref.okayama.jp/page/311846.html",
-    "広島県": "https://www.pref.hiroshima.lg.jp/site/nyusatsukeiyaku/list945-13098.html",
+    "広島県": "https://www.pref.hiroshima.lg.jp/site/nyusatsukeiyaku/",
     "山口県": "https://www.pref.yamaguchi.lg.jp/soshiki/127/23376.html",
-    "徳島県": "https://www.pref.tokushima.lg.jp/ippannokata/nyusatsu/",
-    "香川県": "https://www.pref.kagawa.lg.jp/kense/nyusatsu/",
-    "愛媛県": "https://www.pref.ehime.jp/site/nyusatsu/39222.html",
-    "高知県": "https://www.pref.kochi.lg.jp/category/bunya/shigoto_sangyo/nyusatsujoho/ippankyosonyusatsu_proposal/more@docs_1.html",
-    "福岡県": "https://www.pref.fukuoka.lg.jp/bid/",
-    "佐賀県": "https://www.pref.saga.lg.jp/list02061.html",
-    "長崎県": "https://www.pref.nagasaki.lg.jp/object/nyusatsu-chotatsujoho/gyomuitakukekka/index.html",
-    "熊本県": "https://www.pref.kumamoto.lg.jp/soshiki/12/",
-    "大分県": "https://www.pref.oita.jp/site/nyusatu-koubo/index.html",
-    "宮崎県": "https://www.pref.miyazaki.lg.jp/shinchaku/nyusatsu/index.html",
-    "鹿児島県": "https://www.pref.kagoshima.jp/ad01/nyusatsu/index.html",
-    "沖縄県": "https://www.pref.okinawa.lg.jp/shigoto/nyusatsukeiyaku/1015342/1025064/1032417/index.html"
+    "徳島県": "https://www.pref.tokushima.lg.jp/jigyoshanokata/nyusatsu/",
+    "香川県": "https://www.pref.kagawa.lg.jp/kensei/nyusatsu/index.html",
+    "愛媛県": "https://www.pref.ehime.jp/site/nyusatsu/",
+    "高知県": "https://www.pref.kochi.lg.jp/soshiki/110301/nyusatsu-joho.html",
+    "福岡県": "https://www.pref.fukuoka.lg.jp/bid/itaku.html",
+    "佐賀県": "https://www.pref.saga.lg.jp/list01579.html",
+    "長崎県": "https://www.pref.nagasaki.lg.jp/object/nyusatsu-chotatsujoho/",
+    "熊本県": "https://www.pref.kumamoto.lg.jp/soshiki/12/itaku.html",
+    "大分県": "https://www.pref.oita.jp/site/nyusatu-koubo/",
+    "宮崎県": "https://www.pref.miyazaki.lg.jp/kense/chotatsu/index.html",
+    "鹿児島県": "https://www.pref.kagoshima.jp/kensei/nyusatsu/index.html",
+    "沖縄県": "https://www.pref.okinawa.lg.jp/shigoto/nyusatsukeiyaku/index.html"
 }
 
 def get_latest_urls_via_google(pref_name: str) -> List[str]:
@@ -68,7 +68,7 @@ def get_latest_urls_via_google(pref_name: str) -> List[str]:
         return []
 
     # 運用ルールに基づき、動画関連に特化したクエリ
-    query = f"{pref_name} 映像 制作 委託 公募 site:pref.{pref_name}.lg.jp"
+    query = f"{pref_name} 映像 動画 制作 委託 公募 site:pref.{pref_name}.lg.jp"
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {'key': api_key, 'cx': cx, 'q': query, 'num': 3}
 
