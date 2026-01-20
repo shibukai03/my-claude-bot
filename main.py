@@ -1,57 +1,49 @@
-"""
-行政映像案件スクレイピングシステム
-メインエントリーポイント（総数表示 ＋ 日本時間修正版）
-"""
-
 import logging
 import sys
+import os
 from datetime import datetime, timezone, timedelta
+from analyzer.ai_analyzer import AIAnalyzer
+from database.sheets_manager import SheetsManager
+# ※ scrapersモジュール等は既存のものを使用
 
-# ロギング設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング開始（日本時間 ＋ 発見総数表示版）")
+    logger.info("映像案件スクレイピング v1.2（Sonnet全件精査版）")
     logger.info("=" * 60)
-    
+
     try:
+        # 既存スクレイパー等のインポート
         from scrapers.direct_scraper import search_all_prefectures_direct
         from scrapers.content_extractor import ContentExtractor
-        from analyzer.ai_analyzer import AIAnalyzer
-        from database.sheets_manager import SheetsManager
         
-        extractor = ContentExtractor()
         analyzer = AIAnalyzer()
-        sheets_manager = SheetsManager()
-        
-        # --- 1. 日本時間 (JST) の取得設定 ---
+        # 環境変数から情報を取得
+        creds = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"]) # 設定に合わせて調整
+        sheets_manager = SheetsManager(os.environ["SPREADSHEET_ID"], creds)
+        extractor = ContentExtractor()
+
         jst = timezone(timedelta(hours=9))
-        now_jst = datetime.now(jst)
-        now_str = now_jst.strftime('%Y-%m-%d %H:%M')
-        today = now_jst.date()
-        
-        sheet_name = sheets_manager.create_monthly_sheet()
-        sheets_manager.open_sheet(sheet_name)
-        
-        # --- 2. 調査の実行 ---
+        today = datetime.now(jst).date()
+        sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v12")
+
+        # 1. シートのリセットと準備
+        worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
+
+        # 2. 全都道府県からリンクを収集
         prefecture_results = search_all_prefectures_direct()
-        
-        # 全リンクをひとつのリストにまとめる
         all_urls = [r for results in prefecture_results.values() for r in results]
         
-        # --- 【追加】発見した総件数をログに表示 ---
-        logger.info(f"全国47都道府県の調査が完了しました。")
-        logger.info(f">>> 発見した総リンク数: {len(all_urls)} 件")
-        logger.info(f"このうち上位100件をAIで精査します。")
-        # ----------------------------------------
-        
+        total_found = len(all_urls)
+        logger.info(f">>> 発見した総リンク数: {total_found} 件。全件精査を開始します。")
+
         final_valid_projects = []
         processed_urls = set()
-        
-        # 解析（上位100件）
-        for url_data in all_urls[:100]:
+
+        # 3. 解析ループ（全件）
+        for url_data in all_urls:
             url = url_data['url']
             if url in processed_urls: continue
             processed_urls.add(url)
@@ -61,38 +53,30 @@ def main():
             
             analysis = analyzer.analyze_project(content)
             
-            if analysis:
-                deadline = analysis.get('deadline', '不明')
-                is_valid = False
-                if deadline == "不明":
-                    is_valid = True
-                else:
+            if analysis and analysis['label'] in ["A", "B"]:
+                # ゲート判定（参加申込締切が過ぎていないか）
+                d_app = analysis.get('deadline_app')
+                if d_app and d_app != "不明":
                     try:
-                        deadline_date = datetime.strptime(deadline, '%Y-%m-%d').date()
-                        if deadline_date >= today:
-                            is_valid = True
-                    except:
-                        is_valid = True
+                        if datetime.strptime(d_app, '%Y-%m-%d').date() < today:
+                            logger.info(f"⏩ 期限切れ(申込終了)のため除外: {analysis['title']}")
+                            continue
+                    except: pass
                 
-                if is_valid:
-                    final_data = {
-                        'date': now_str, # 日本時間での記録
-                        'prefecture': analysis['prefecture'],
-                        'title': analysis['title'],
-                        'summary': analysis['summary'],
-                        'deadline': deadline,
-                        'source_url': url,
-                        'application_url': analysis['application_url']
-                    }
-                    final_valid_projects.append(final_data)
-                    logger.info(f"✅ 合格: [{analysis['prefecture']}] {analysis['title']}")
+                analysis['source_url'] = url
+                final_valid_projects.append(analysis)
+                logger.info(f"✅ 合格[{analysis['label']}]: {analysis['title']}")
 
-        if final_valid_projects:
-            added = sheets_manager.append_projects(final_valid_projects)
-            logger.info(f"✓ 完了: {added} 件の新規案件をスプレッドシートに保存しました")
-        else:
-            logger.info("保存対象の新しい案件は見つかりませんでした")
-            
+        # 4. 保存と集計
+        added = sheets_manager.append_projects(worksheet, final_valid_projects)
+        
+        logger.info("=" * 60)
+        logger.info("✨ 調査完了サマリー ✨")
+        logger.info(f"1. 総発見リンク: {total_found} 件")
+        logger.info(f"2. AI精査数: {len(processed_urls)} 件")
+        logger.info(f"3. スプレッドシート追加: {added} 件")
+        logger.info("=" * 60)
+
     except Exception as e:
         logger.error(f"システムエラー: {e}")
         sys.exit(1)
