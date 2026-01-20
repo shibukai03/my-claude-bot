@@ -20,11 +20,17 @@ def main():
         from scrapers.content_extractor import ContentExtractor
         
         analyzer = AIAnalyzer()
-        # 環境変数から設定取得
-        spreadsheet_id = os.environ["SPREADSHEET_ID"]
-        # 環境変数名が設定により異なる可能性があるため注意
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON") or os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+        
+        # --- 修正箇所：Secretsの名前に合わせました ---
+        spreadsheet_id = os.environ.get("SPREADSHEET_ID")
+        creds_json = os.environ.get("GCP_SERVICE_ACCOUNT") # 画像3枚目の名前に修正
+        
+        if not creds_json:
+            logger.error("エラー: Secretsの 'GCP_SERVICE_ACCOUNT' が取得できません。")
+            return
+        
         creds = json.loads(creds_json)
+        # ------------------------------------------
         
         sheets_manager = SheetsManager(spreadsheet_id, creds)
         extractor = ContentExtractor()
