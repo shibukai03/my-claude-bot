@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SheetsManager:
-    # 指示書 v1.2 準拠のヘッダー
+    # 指示書 v1.2 準拠の16項目
     HEADER = [
         "案件ID", "ラベル", "発注主体", "都道府県/市区町村", "件名", 
         "方式", "予算上限/予定価格", "履行期間", 
@@ -20,17 +20,14 @@ class SheetsManager:
         self.spreadsheet = self.client.open_by_key(spreadsheet_id)
 
     def prepare_v12_sheet(self, sheet_name):
-        """指示書v1.2用の新しいシートを準備する"""
+        """指示書v1.2用の新しいシートを準備（既存があればリセット）"""
         try:
-            # 既存の同名シートがあれば削除（リセット）
             try:
                 ws = self.spreadsheet.worksheet(sheet_name)
                 self.spreadsheet.del_worksheet(ws)
-                logger.info(f"既存のシート '{sheet_name}' をリセットしました。")
             except gspread.exceptions.WorksheetNotFound:
                 pass
             
-            # 新規作成してヘッダーを書き込む
             ws = self.spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
             ws.append_row(self.HEADER)
             return ws
@@ -39,14 +36,14 @@ class SheetsManager:
             return None
 
     def append_projects(self, worksheet, projects):
-        """A/Bラベルのついた案件をスプレッドシートに追加"""
+        """A/Bラベルの案件をスプレッドシートに一括追加"""
         rows_to_add = []
         for i, p in enumerate(projects, 1):
             row = [
-                i, p['label'], p['prefecture'], p['prefecture'], p['title'],
-                p['method'], p['budget'], p['period'],
-                p['deadline_app'], p['deadline_ques'], p['deadline_prop'],
-                p['source_url'], p['source_url'], p['evidence'], p['tag'], p['memo']
+                i, p.get('label'), p.get('prefecture'), p.get('prefecture'), p.get('title'),
+                p.get('method'), p.get('budget'), p.get('period'),
+                p.get('deadline_app'), p.get('deadline_ques'), p.get('deadline_prop'),
+                p.get('source_url'), p.get('source_url'), p.get('evidence'), p.get('tag'), p.get('memo')
             ]
             rows_to_add.append(row)
         
