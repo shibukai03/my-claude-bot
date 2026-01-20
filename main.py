@@ -11,41 +11,31 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.2（指示書完全準拠版）")
+    logger.info("映像案件スクレイピング v1.2（エラー修正版）")
     logger.info("=" * 60)
 
     try:
-        # スクリーパー等のインポート
         from scrapers.direct_scraper import search_all_prefectures_direct
         from scrapers.content_extractor import ContentExtractor
         
         analyzer = AIAnalyzer()
-        
-        # --- 修正箇所：Secretsの名前に合わせました ---
         spreadsheet_id = os.environ.get("SPREADSHEET_ID")
-        creds_json = os.environ.get("GCP_SERVICE_ACCOUNT") # 画像3枚目の名前に修正
+        creds_json = os.environ.get("GCP_SERVICE_ACCOUNT")
         
         if not creds_json:
             logger.error("エラー: Secretsの 'GCP_SERVICE_ACCOUNT' が取得できません。")
             return
         
         creds = json.loads(creds_json)
-        # ------------------------------------------
-        
         sheets_manager = SheetsManager(spreadsheet_id, creds)
         extractor = ContentExtractor()
 
         jst = timezone(timedelta(hours=9))
-        now_jst = datetime.now(jst)
-        today = now_jst.date()
-        # 新しい項目名でシートを作成
-        sheet_name = now_jst.strftime("映像案件_%Y年%m月_v12")
+        today = datetime.now(jst).date()
+        sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v12")
 
-        # 1. シートの準備
+        # 1. シートの準備（シートが既にある場合はそれを使います）
         worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
-        if not worksheet:
-            logger.error("シートの作成に失敗しました")
-            return
 
         # 2. 全リンクの収集
         prefecture_results = search_all_prefectures_direct()
@@ -57,7 +47,7 @@ def main():
         final_valid_projects = []
         processed_urls = set()
 
-        # 3. 全件解析ループ
+        # 3. 解析ループ
         for url_data in all_urls:
             url = url_data['url']
             if url in processed_urls: continue
@@ -66,10 +56,11 @@ def main():
             content = extractor.extract(url)
             if not content: continue
             
+            # 判定（修正後のanalyze_projectを呼び出し）
             analysis = analyzer.analyze_project(content)
             
             if analysis and analysis.get('label') in ["A", "B"]:
-                # 指示書3.3項に基づく「募集中（ゲート判定）」
+                # ゲート判定（申込期限切れを弾く）
                 d_app = analysis.get('deadline_app')
                 if d_app and d_app != "不明":
                     try:
@@ -82,15 +73,12 @@ def main():
                 final_valid_projects.append(analysis)
                 logger.info(f"✅ 合格[{analysis['label']}]: {analysis['title']}")
 
-        # 4. 書き込みとサマリー
-        added = sheets_manager.append_projects(worksheet, final_valid_projects)
+        # 4. 書き込み
+        if final_valid_projects:
+            added = sheets_manager.append_projects(worksheet, final_valid_projects)
+            logger.info(f"スプレッドシートに {added} 件追加しました。")
         
-        logger.info("=" * 60)
-        logger.info("✨ 調査完了サマリー ✨")
-        logger.info(f"1. 発見した総リンク数: {total_found} 件")
-        logger.info(f"2. AI精査数: {len(processed_urls)} 件")
-        logger.info(f"3. スプレッドシート追加: {added} 件")
-        logger.info("=" * 60)
+        logger.info("✨ 調査完了 ✨")
 
     except Exception as e:
         logger.error(f"システムエラー: {e}")
