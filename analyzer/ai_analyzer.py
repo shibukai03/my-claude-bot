@@ -1,23 +1,24 @@
 import logging
 from anthropic import Anthropic
 import json
+import time
 
 logger = logging.getLogger(__name__)
 
 class AIAnalyzer:
     def __init__(self):
         self.client = Anthropic()
-        self.model = "claude-3-5-sonnet-20240620"
+        # モデル名を最新の推奨名に修正
+        self.model = "claude-3-5-sonnet-latest"
 
     def analyze_project(self, content_data):
-        # 取得データの正規化（テキストを確実に抽出する）
+        # 取得データの正規化
         text = ""
         if isinstance(content_data, dict):
             text = content_data.get('text') or content_data.get('content') or ""
         elif isinstance(content_data, str):
             text = content_data
 
-        # 10文字未満は流石に中身がないと判断
         if not text or len(text.strip()) < 10:
             logger.warning("AI解析スキップ: 抽出されたテキストが短すぎます。")
             return None
@@ -51,7 +52,7 @@ C：除外（募集終了、結果発表、物品購入、動画要件なし）
 }
 """
         try:
-            # AIへのリクエスト
+            # APIへのリクエスト（12,000文字まで）
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
@@ -59,6 +60,10 @@ C：除外（募集終了、結果発表、物品購入、動画要件なし）
                 messages=[{"role": "user", "content": f"解析対象テキスト:\n\n{text[:12000]}"}]
             )
             res_text = message.content[0].text
+            
+            # APIの負荷を考慮し、成功時に少し待機（任意）
+            time.sleep(1)
+            
             return json.loads(res_text)
         except Exception as e:
             logger.error(f"Sonnet解析エラー: {e}")
