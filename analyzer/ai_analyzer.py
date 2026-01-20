@@ -6,9 +6,9 @@ logger = logging.getLogger(__name__)
 
 class AIAnalyzer:
     def __init__(self):
-        # APIキーは環境変数から自動読み込み
+        # APIキーは環境変数から読み込まれます
         self.client = Anthropic()
-        # モデルはSonnetを指定
+        # 高精度なSonnetモデルを使用
         self.model = "claude-3-5-sonnet-20240620"
 
     def analyze_project(self, text):
@@ -49,7 +49,6 @@ C：除外（除外条件に該当、または動画要件が確認できない/
                 system=system_prompt,
                 messages=[{"role": "user", "content": f"以下のテキストを解析してください:\n\n{text[:10000]}"}]
             )
-            # JSON部分のみ抽出してパース
             return json.loads(message.content[0].text)
         except Exception as e:
             logger.error(f"AI解析エラー: {e}")
