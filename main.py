@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.2 [Step 3: 深層解析・長時間稼働版]")
+    logger.info("映像案件スクレイピング v1.2 [動作確認モード：期限フィルターOFF]")
     logger.info("=" * 60)
 
     try:
@@ -27,32 +27,26 @@ def main():
         extractor = ContentExtractor()
 
         jst = timezone(timedelta(hours=9))
-        today = datetime.now(jst).date()
-        sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v12")
+        sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_検証")
 
-        # シートの準備
         worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
 
-        # 1. 全リンクの収集
         prefecture_results = search_all_prefectures_direct()
         all_urls = [r for results in prefecture_results.values() for r in results]
         
         total_found = len(all_urls)
-        logger.info(f">>> 総リンク数 {total_found} 件のディープ解析を開始します。")
-        logger.info("※ 1件ずつPDFを全ページ精査するため、完了まで約1〜2時間かかります。")
+        logger.info(f">>> 総リンク数 {total_found} 件の解析を開始します。")
 
         final_valid_projects = []
         processed_count = 0
         added_count = 0
 
-        # 2. 全件解析ループ
         for url_data in all_urls:
             url = url_data['url']
             processed_count += 1
             
-            # 進捗ログ（10件ごとに報告）
-            if processed_count % 10 == 0:
-                logger.info(f"--- 進捗報告: {processed_count} / {total_found} 件完了 ---")
+            if processed_count % 5 == 0:
+                logger.info(f"--- 進捗: {processed_count} / {total_found} ---")
 
             try:
                 content = extractor.extract(url)
@@ -60,38 +54,25 @@ def main():
                 
                 analysis = analyzer.analyze_project(content)
                 
+                # AまたはB判定なら、期限に関わらず一旦すべて保存する（検証のため）
                 if analysis and analysis.get('label') in ["A", "B"]:
-                    # ゲート判定（申込期限切れを弾く）
-                    d_app = analysis.get('deadline_app')
-                    if d_app and d_app != "不明":
-                        try:
-                            if datetime.strptime(d_app, '%Y-%m-%d').date() < today:
-                                logger.info(f"⏩ 期限切れにつき除外: {analysis['title']}")
-                                continue
-                        except: pass
-                    
                     analysis['source_url'] = url
                     final_valid_projects.append(analysis)
                     added_count += 1
-                    logger.info(f"✅ 合格[{analysis['label']}]: {analysis['title']}")
+                    logger.info(f"✅ 検知: {analysis['title']} (判定:{analysis['label']})")
                     
-                    # 万が一のクラッシュに備え、5件溜まるごとにシートへ書き込む（堅牢化）
-                    if len(final_valid_projects) >= 5:
+                    if len(final_valid_projects) >= 3: # 3件ごとに書き込み
                         sheets_manager.append_projects(worksheet, final_valid_projects)
-                        final_valid_projects = [] # リストを空にする
+                        final_valid_projects = []
                 
             except Exception as e:
-                logger.error(f"案件スキップ（個別エラー）: {url} - {e}")
+                logger.error(f"解析スキップ: {url} - {e}")
                 continue
 
-        # 3. 残りのデータを書き込み
         if final_valid_projects:
             sheets_manager.append_projects(worksheet, final_valid_projects)
         
-        logger.info("=" * 60)
-        logger.info("✨ 深層解析パトロール完了 ✨")
-        logger.info(f"精査数: {processed_count} 件 / スプレッドシート追加: {added_count} 件")
-        logger.info("=" * 60)
+        logger.info(f"精査数: {processed_count} 件 / シート追加: {added_count} 件")
 
     except Exception as e:
         logger.error(f"システムエラー: {e}")
