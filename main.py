@@ -76,23 +76,18 @@ def main():
         
         logger.info(f"✅ {len(batch_requests)}件のコンテンツ抽出完了")
         
-        # 3. Batch APIリクエストファイルを作成
-        logger.info("【ステップ3】Batch APIリクエスト作成")
-        batch_file = "/tmp/batch_requests.jsonl"
-        
-        with open(batch_file, 'w', encoding='utf-8') as f:
-            for req in batch_requests:
-                f.write(json.dumps(req, ensure_ascii=False) + '\n')
-        
-        logger.info(f"✅ リクエストファイル作成: {batch_file}")
-        
-        # 4. Batch送信
-        logger.info("【ステップ4】Anthropic Batch API送信")
-        
-        batch = analyzer.client.beta.messages.batches.create(requests=batch_file)
-        
-        batch_id = batch.id
-        logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
+        # 3. Batch API送信の準備
+logger.info("【ステップ3】Batch API送信準備")
+logger.info(f"送信件数: {len(batch_requests)}件")
+
+# 4. Batch送信
+logger.info("【ステップ4】Anthropic Batch API送信")
+
+# 正しい方法：リストを直接渡す
+batch = analyzer.client.beta.messages.batches.create(requests=batch_requests)
+
+batch_id = batch.id
+logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
         
         # 5. 完了待機
         logger.info("【ステップ5】処理完了を待機中...")
