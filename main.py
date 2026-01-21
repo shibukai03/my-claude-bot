@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.4 [Batch API 修正版]")
+    logger.info("映像案件スクレイピング v1.4 [Batch API 最終調整版]")
     logger.info("=" * 60)
 
     try:
@@ -58,28 +58,29 @@ def main():
         batch = analyzer.client.beta.messages.batches.create(requests=batch_requests)
         batch_id = batch.id
         
-        # 4. 完了まで待機ループ（属性名を修正）
+        # 4. 完了まで待機ループ（属性名を succeeded に修正）
         logger.info(f"解析中... (Batch ID: {batch_id})")
+        
         while True:
-            # retrieve で最新のステータスを取得
             batch_status = analyzer.client.beta.messages.batches.retrieve(batch_id)
-            # 正しい属性名は 'processing_status'
             status = batch_status.processing_status 
             
-            completed_count = batch_status.request_counts.completed
-            logger.info(f"現在のステータス: {status} ({completed_count} / {len(batch_requests)} 件完了)")
+            # ステータスごとの件数を集計して進捗を表示
+            counts = batch_status.request_counts
+            finished = counts.succeeded + counts.errored + counts.canceled + counts.expired
+            
+            logger.info(f"現在のステータス: {status} ({finished} / {len(batch_requests)} 件処理済み)")
             
             if status == "ended":
                 break
             
-            # 完了に近づくほどチェック間隔を調整しても良いですが、1分おきで十分です
+            # 1分おきにチェック
             time.sleep(60)
 
         # 5. 結果の回収と超厳格フィルター
         logger.info("解析完了。結果をダウンロードして最終チェックを行います。")
         final_valid_projects = []
         
-        # 結果の取得（イテレータを使用）
         for result in analyzer.client.beta.messages.batches.results(batch_id):
             custom_id = result.custom_id
             if result.result.type == "message":
@@ -92,7 +93,6 @@ def main():
                     if analysis.get('label') in ["A", "B"]:
                         d_prop = analysis.get('deadline_prop', "不明")
                         
-                        # 期限不明または過去なら除外
                         if not d_prop or d_prop == "不明":
                             continue
                         
@@ -100,11 +100,10 @@ def main():
                         if date_match:
                             y, m, d = map(int, date_match.groups())
                             if datetime(y, m, d).date() < today:
-                                continue # 期限切れ
+                                continue 
                         else:
-                            continue # 形式不明
+                            continue
 
-                        # 合格
                         orig = url_map[custom_id]
                         analysis['source_url'] = orig['url']
                         analysis['prefecture'] = orig['pref']
@@ -116,7 +115,7 @@ def main():
             sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_Batch")
             worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
             sheets_manager.append_projects(worksheet, final_valid_projects)
-            logger.info(f"✨ パトロール完了！ {len(final_valid_projects)} 件の有効案件をシートに追加しました。")
+            logger.info(f"✨ パトロール完了！ {len(final_valid_projects)} 件をシートに追加しました。")
         else:
             logger.info("現在応募可能な映像案件は見つかりませんでした。")
 
