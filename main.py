@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.5 [デバッグ強化版]")
+    logger.info("映像案件スクレイピング v1.5 [Batch API 最終完成版]")
     logger.info("=" * 60)
     
     try:
@@ -25,7 +25,6 @@ def main():
         extractor = ContentExtractor()
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst).date()
-        today_str = today.strftime("%Y-%m-%d")
         
         # 1. リンク収集
         logger.info("【ステップ1】リンク収集開始")
@@ -39,7 +38,7 @@ def main():
         
         logger.info(f"✅ {len(all_tasks)} 件のリンクを収集")
         
-        # テストモード: 最初の10件のみ処理
+        # 🧪 テストモード: 最初の10件のみ処理 (本番はここを False に)
         TEST_MODE = True
         if TEST_MODE:
             all_tasks = all_tasks[:10]
@@ -51,19 +50,12 @@ def main():
         url_map = {}
         
         for i, task in enumerate(all_tasks, 1):
-            logger.info(f"抽出進捗: {i}/{len(all_tasks)} - {task['title'][:50]}")
+            logger.info(f"抽出中 ({i}/{len(all_tasks)}): {task['title'][:30]}...")
             content_data = extractor.extract(task['url'])
             
             if not content_data:
                 logger.warning(f"⚠️ 抽出失敗: {task['url']}")
                 continue
-            
-            # 抽出されたテキストの最初の部分をログ出力（最初の3件のみ）
-            if i <= 3:
-                logger.info(f"--- サンプル {i} ---")
-                logger.info(f"タイトル: {task['title']}")
-                logger.info(f"テキスト冒頭: {content_data.get('content', '')[:300]}...")
-                logger.info("-" * 60)
             
             custom_id = f"req_{i}"
             url_map[custom_id] = task
@@ -74,164 +66,85 @@ def main():
             logger.warning("❌ 解析対象のデータがありません")
             return
         
-        logger.info(f"✅ {len(batch_requests)}件のコンテンツ抽出完了")
+        # 3. Batch送信
+        logger.info(f"【ステップ3】Anthropic Batch API送信 ({len(batch_requests)}件)")
+        batch = analyzer.client.beta.messages.batches.create(requests=batch_requests)
+        batch_id = batch.id
+        logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
         
-        # 3. Batch API送信の準備
-logger.info("【ステップ3】Batch API送信準備")
-logger.info(f"送信件数: {len(batch_requests)}件")
-
-# 4. Batch送信
-logger.info("【ステップ4】Anthropic Batch API送信")
-
-# 正しい方法：リストを直接渡す
-batch = analyzer.client.beta.messages.batches.create(requests=batch_requests)
-
-batch_id = batch.id
-logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
-        
-        # 5. 完了待機
-        logger.info("【ステップ5】処理完了を待機中...")
-        
-        wait_count = 0
+        # 4. 完了待機
+        logger.info("【ステップ4】処理完了を待機中...")
         while True:
             batch_status = analyzer.client.beta.messages.batches.retrieve(batch_id)
             status = batch_status.processing_status
             counts = batch_status.request_counts
-            
             total = counts.succeeded + counts.errored + counts.canceled + counts.expired
             
-            logger.info(f"⏳ {status}: {total}/{len(batch_requests)}件処理済み (成功:{counts.succeeded}, エラー:{counts.errored})")
-            
-            if status == "ended":
-                break
-            
-            wait_count += 1
-            if wait_count > 60:
-                logger.error("⏰ タイムアウト: 60分経過しても完了しませんでした")
-                return
-            
-            time.sleep(60)
+            logger.info(f"⏳ {status}: {total}/{len(batch_requests)}件完了 (成功:{counts.succeeded}, 失敗:{counts.errored})")
+            if status == "ended": break
+            time.sleep(30)
         
-        # 6. 結果取得
-        logger.info("【ステップ6】結果取得・解析")
-        
-        # 統計情報
-        stats = {
-            "label_a": 0,
-            "label_b": 0,
-            "label_c": 0,
-            "errors": 0
-        }
-        
+        # 5. 結果解析
+        logger.info("【ステップ5】結果取得・解析開始")
+        stats = {"A": 0, "B": 0, "C": 0, "errors": 0}
         label_c_reasons = []
         final_valid_projects = []
         
-        # 結果取得
         results_response = analyzer.client.beta.messages.batches.results(batch_id)
         
         for result in results_response:
             custom_id = result.custom_id
-            
             if result.result.type == "succeeded":
                 try:
-                    message = result.result.message
-                    res_text = message.content[0].text
-                    
-                    # JSONを抽出
+                    res_text = result.result.message.content[0].text
                     match = re.search(r'\{.*\}', res_text, re.DOTALL)
-                    if not match:
-                        logger.warning(f"⚠️ JSON抽出失敗: {custom_id}")
-                        stats["errors"] += 1
-                        continue
-                    
+                    if not match: continue
                     analysis = json.loads(match.group(0))
                     label = analysis.get('label', 'C')
                     
-                    # 統計を記録
-                    if label == "A":
-                        stats["label_a"] += 1
-                    elif label == "B":
-                        stats["label_b"] += 1
-                    else:
-                        stats["label_c"] += 1
-                        # Label Cの理由を記録
-                        orig_task = url_map.get(custom_id, {})
-                        label_c_reasons.append({
-                            "title": analysis.get('title', orig_task.get('title', '不明'))[:100],
-                            "evidence": analysis.get('evidence', '理由不明')[:200],
-                            "memo": analysis.get('memo', '')[:100],
-                            "deadline": analysis.get('deadline_prop', '不明')
-                        })
+                    # 統計
+                    stats[label] = stats.get(label, 0) + 1
+                    if label == "C":
+                        label_c_reasons.append({"title": analysis.get('title', '不明'), "evidence": analysis.get('evidence', '理由不明')})
                     
-                    # Label AまたはBの場合は保存候補
                     if label in ["A", "B"]:
                         d_prop = analysis.get('deadline_prop', "不明")
-                        
-                        # 締切チェック
+                        # 日付チェック
                         if d_prop and d_prop != "不明":
                             date_match = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', d_prop)
                             if date_match:
                                 y, m, d = map(int, date_match.groups())
-                                deadline_date = datetime(y, m, d).date()
-                                
-                                if deadline_date < today:
-                                    logger.info(f"⏩ 締切超過のため除外: {analysis.get('title')} (締切:{d_prop})")
+                                if datetime(y, m, d).date() < today:
+                                    logger.info(f"⏩ 期限切れにつき除外: {analysis.get('title')}")
                                     continue
                         
-                        # 合格
                         orig = url_map[custom_id]
                         analysis['source_url'] = orig['url']
                         analysis['prefecture'] = orig['pref']
                         final_valid_projects.append(analysis)
-                        
-                        logger.info(f"✅ 合格 [Label {label}]: {analysis.get('title')} (締切:{d_prop})")
-                
-                except json.JSONDecodeError as e:
-                    logger.error(f"❌ JSON解析エラー ({custom_id}): {e}")
-                    stats["errors"] += 1
-                except Exception as e:
-                    logger.error(f"❌ 処理エラー ({custom_id}): {e}")
-                    stats["errors"] += 1
-            
-            elif result.result.type == "errored":
-                logger.error(f"❌ API error: {custom_id}")
-                stats["errors"] += 1
+                        logger.info(f"✅ 合格: {analysis.get('title')}")
+                except: stats["errors"] += 1
         
-        # 詳細な統計とデバッグ情報を出力
+        # デバッグ情報の表示
         logger.info("=" * 60)
-        logger.info("📊 判定結果の統計")
-        logger.info("=" * 60)
-        logger.info(f"Label A (最優先): {stats['label_a']}件")
-        logger.info(f"Label B (通常): {stats['label_b']}件")
-        logger.info(f"Label C (除外): {stats['label_c']}件")
-        logger.info(f"エラー: {stats['errors']}件")
-        logger.info(f"合格案件: {len(final_valid_projects)}件")
-        logger.info("=" * 60)
-        
-        # Label Cの理由を出力（最大10件）
+        logger.info(f"📊 判定統計 - A:{stats['A']}件, B:{stats['B']}件, C:{stats['C']}件")
         if label_c_reasons:
-            logger.info("🔍 除外された案件の理由（サンプル10件）")
-            logger.info("=" * 60)
-            for i, reason in enumerate(label_c_reasons[:10], 1):
-                logger.info(f"{i}. タイトル: {reason['title']}")
-                logger.info(f"   締切: {reason['deadline']}")
-                logger.info(f"   証拠: {reason['evidence']}")
-                logger.info(f"   メモ: {reason['memo']}")
-                logger.info("-" * 60)
-        
-        # 7. スプレッドシート書き込み
+            logger.info("🔍 除外された理由（最初の5件）:")
+            for r in label_c_reasons[:5]:
+                logger.info(f"  - {r['title']}: {r['evidence']}")
+        logger.info("=" * 60)
+
+        # 6. スプレッドシート書き込み
         if final_valid_projects:
-            logger.info("【ステップ7】スプレッドシート書き込み")
             sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v15")
             worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
             sheets_manager.append_projects(worksheet, final_valid_projects)
             logger.info(f"✨ 完了！ {len(final_valid_projects)}件をシートに追加")
         else:
-            logger.warning("⚠️ 応募可能な映像案件は見つかりませんでした")
-            logger.info("💡 上記の除外理由を確認してください")
+            logger.warning("⚠️ 適合する案件はありませんでした")
         
     except Exception as e:
-        logger.error(f"❌ システムエラー: {e}", exc_info=True)
+        logger.error(f"❌ システムエラー: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
