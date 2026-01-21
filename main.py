@@ -78,7 +78,7 @@ def main():
             time.sleep(60)
 
         # 5. 結果の回収と超厳格フィルター
-        logger.info("解析完了。結果をダウンロードして最終チェックを行います。")
+        logger.info("結果を回収し、期限と内容を最終チェックします。")
         final_valid_projects = []
         
         for result in analyzer.client.beta.messages.batches.results(batch_id):
@@ -93,21 +93,27 @@ def main():
                     if analysis.get('label') in ["A", "B"]:
                         d_prop = analysis.get('deadline_prop', "不明")
                         
+                        # 日付不明で落ちた場合もログに出す
                         if not d_prop or d_prop == "不明":
+                            logger.info(f"⏩ [判定保留] 映像案件の可能性大だが日付不明のため除外: {analysis.get('title')}")
                             continue
                         
                         date_match = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', d_prop)
                         if date_match:
                             y, m, d = map(int, date_match.groups())
                             if datetime(y, m, d).date() < today:
+                                # 期限切れは静かに除外
                                 continue 
                         else:
+                            logger.info(f"⏩ [判定保留] 日付形式が不正なため除外: {analysis.get('title')} ({d_prop})")
                             continue
 
+                        # 全て合格
                         orig = url_map[custom_id]
                         analysis['source_url'] = orig['url']
                         analysis['prefecture'] = orig['pref']
                         final_valid_projects.append(analysis)
+                        logger.info(f"✅ 【合格】: {analysis['title']} (締切:{d_prop})")
                 except: continue
 
         # 6. 書き込み
