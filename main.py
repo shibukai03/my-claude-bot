@@ -86,11 +86,14 @@ def main():
         
         logger.info(f"✅ リクエストファイル作成: {batch_file}")
         
+       logger.info(f"✅ リクエストファイル作成: {batch_file}")
+        
         # 4. Batch送信
         logger.info("【ステップ4】Anthropic Batch API送信")
         
-        with open(batch_file, 'rb') as f:
-            batch = analyzer.client.beta.messages.batches.create(requests=f)
+        batch = analyzer.client.beta.messages.batches.create(
+            requests=batch_file
+        )
         
         batch_id = batch.id
         logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
