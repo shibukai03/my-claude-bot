@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import time
+import re
 from datetime import datetime, timezone, timedelta
 from analyzer.ai_analyzer import AIAnalyzer
 from database.sheets_manager import SheetsManager
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.2 [本番運用モード：期限フィルターON]")
+    logger.info("映像案件スクレイピング v1.3 [超厳格モード：期限切れ・不明案件を完全遮断]")
     logger.info("=" * 60)
 
     try:
@@ -32,13 +33,12 @@ def main():
         today = now.date()
         sheet_name = now.strftime("映像案件_%Y年%m月")
 
-        # シートの準備（v1.2用のヘッダー）
+        # シートの準備
         worksheet = sheets_manager.prepare_v12_sheet(sheet_name)
 
-        # 全47都道府県の巡回（direct_scraper.py で設定した複数URLをスキャン）
+        # 全47都道府県の巡回
         prefecture_results = search_all_prefectures_direct()
         
-        # フラットなリストに変換
         all_urls = []
         for pref, results in prefecture_results.items():
             for res in results:
@@ -56,42 +56,56 @@ def main():
             url = url_data['url']
             processed_count += 1
             
-            # 進捗ログ
             if processed_count % 5 == 0:
                 logger.info(f"--- 進捗報告: {processed_count} / {total_found} 件完了 ---")
 
             try:
-                # 1. コンテンツ抽出（HTML + PDF最大30ページ）
+                # 1. コンテンツ抽出（HTML + PDF）
                 content = extractor.extract(url)
-                if not content:
-                    continue
+                if not content: continue
                 
-                # 2. AIによる深層解析
+                # 2. AIによる解析
                 analysis = analyzer.analyze_project(content)
                 
-                # 3. 判定フィルター
+                # 3. 判定フィルター（超厳格判定ロジック）
                 if analysis and analysis.get('label') in ["A", "B"]:
                     
-                    # 【重要】期限切れフィルター：今日以前の締切は除外
-                    d_app = analysis.get('deadline_app')
-                    if d_app and d_app != "不明":
-                        try:
-                            deadline_date = datetime.strptime(d_app, '%Y-%m-%d').date()
-                            if deadline_date < today:
-                                logger.info(f"⏩ 期限切れにつき除外: {analysis['title']} (締切:{d_app})")
-                                continue
-                        except Exception:
-                            pass # 日付形式エラーの場合は念のため残す
+                    # 期限の取得
+                    d_prop = analysis.get('deadline_prop', "不明")
                     
-                    # 有効な案件として追加
+                    # 【厳格化1】日付が「不明」のものは、古い情報やすでに終了した情報の可能性が高いため除外
+                    if d_prop == "不明" or not d_prop:
+                        logger.info(f"⏩ 期限不明のため安全策として除外: {analysis['title']}")
+                        continue
+
+                    # 【厳格化2】日付が今日より前（過去）なら除外
+                    try:
+                        # 数字を抽出して日付を正規化 (YYYY-MM-DD)
+                        date_match = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', d_prop)
+                        if date_match:
+                            y, m, d = map(int, date_match.groups())
+                            deadline_date = datetime(y, m, d).date()
+                            
+                            if deadline_date < today:
+                                logger.info(f"⏩ 期限切れにつき除外: {analysis['title']} (締切:{d_prop})")
+                                continue
+                        else:
+                            # 日付形式が読み取れない特殊な場合も、リスク回避のため除外
+                            logger.info(f"⏩ 不正な日付形式のため除外: {analysis['title']}")
+                            continue
+                    except Exception as e:
+                        logger.warning(f"日付判定エラーのため除外: {analysis['title']} - {e}")
+                        continue
+                    
+                    # 全ての厳格なチェックを通過したものだけを保存
                     analysis['source_url'] = url
                     analysis['prefecture'] = url_data.get('pref', '不明')
                     final_valid_projects.append(analysis)
                     added_count += 1
-                    logger.info(f"✅ 検知: {analysis['title']} (判定:{analysis['label']} / 締切:{d_app or '不明'})")
+                    logger.info(f"✅ 【合格】: {analysis['title']} (締切:{d_prop})")
                     
-                    # 5件溜まったらスプレッドシートへ書き出し（タイムアウト対策）
-                    if len(final_valid_projects) >= 5:
+                    # 3件溜まったら書き出し（より頻繁に保存して安全性を高める）
+                    if len(final_valid_projects) >= 3:
                         sheets_manager.append_projects(worksheet, final_valid_projects)
                         final_valid_projects = []
                 
