@@ -39,7 +39,7 @@ def main():
         logger.info(f"✅ {len(all_tasks)} 件のリンクを収集")
         
         # 🧪 テストモード: 最初の10件のみ処理 (本番はここを False に)
-        TEST_MODE = True
+        TEST_MODE = False
         if TEST_MODE:
             all_tasks = all_tasks[:10]
             logger.info(f"🧪 テストモード: {len(all_tasks)}件のみ処理")
