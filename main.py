@@ -39,7 +39,7 @@ def main():
         
         logger.info(f"✅ {len(all_tasks)} 件のリンクを収集")
         
-        # 🆕 テストモード: 最初の10件のみ処理
+        # テストモード: 最初の10件のみ処理
         TEST_MODE = True
         if TEST_MODE:
             all_tasks = all_tasks[:10]
@@ -58,7 +58,7 @@ def main():
                 logger.warning(f"⚠️ 抽出失敗: {task['url']}")
                 continue
             
-            # 🆕 抽出されたテキストの最初の部分をログ出力（最初の3件のみ）
+            # 抽出されたテキストの最初の部分をログ出力（最初の3件のみ）
             if i <= 3:
                 logger.info(f"--- サンプル {i} ---")
                 logger.info(f"タイトル: {task['title']}")
@@ -86,14 +86,10 @@ def main():
         
         logger.info(f"✅ リクエストファイル作成: {batch_file}")
         
-       logger.info(f"✅ リクエストファイル作成: {batch_file}")
-        
         # 4. Batch送信
         logger.info("【ステップ4】Anthropic Batch API送信")
         
-        batch = analyzer.client.beta.messages.batches.create(
-            requests=batch_file
-        )
+        batch = analyzer.client.beta.messages.batches.create(requests=batch_file)
         
         batch_id = batch.id
         logger.info(f"✅ Batch送信完了 (ID: {batch_id})")
@@ -115,7 +111,7 @@ def main():
                 break
             
             wait_count += 1
-            if wait_count > 60:  # 60分以上待ったら中断
+            if wait_count > 60:
                 logger.error("⏰ タイムアウト: 60分経過しても完了しませんでした")
                 return
             
@@ -124,7 +120,7 @@ def main():
         # 6. 結果取得
         logger.info("【ステップ6】結果取得・解析")
         
-        # 🆕 統計情報
+        # 統計情報
         stats = {
             "label_a": 0,
             "label_b": 0,
@@ -132,10 +128,10 @@ def main():
             "errors": 0
         }
         
-        label_c_reasons = []  # 🆕 Label Cの理由を記録
+        label_c_reasons = []
         final_valid_projects = []
         
-        # 🔧 正しい結果取得方法
+        # 結果取得
         results_response = analyzer.client.beta.messages.batches.results(batch_id)
         
         for result in results_response:
@@ -156,14 +152,14 @@ def main():
                     analysis = json.loads(match.group(0))
                     label = analysis.get('label', 'C')
                     
-                    # 🆕 統計を記録
+                    # 統計を記録
                     if label == "A":
                         stats["label_a"] += 1
                     elif label == "B":
                         stats["label_b"] += 1
                     else:
                         stats["label_c"] += 1
-                        # 🆕 Label Cの理由を記録
+                        # Label Cの理由を記録
                         orig_task = url_map.get(custom_id, {})
                         label_c_reasons.append({
                             "title": analysis.get('title', orig_task.get('title', '不明'))[:100],
@@ -206,7 +202,7 @@ def main():
                 logger.error(f"❌ API error: {custom_id}")
                 stats["errors"] += 1
         
-        # 🆕 詳細な統計とデバッグ情報を出力
+        # 詳細な統計とデバッグ情報を出力
         logger.info("=" * 60)
         logger.info("📊 判定結果の統計")
         logger.info("=" * 60)
@@ -217,7 +213,7 @@ def main():
         logger.info(f"合格案件: {len(final_valid_projects)}件")
         logger.info("=" * 60)
         
-        # 🆕 Label Cの理由を出力（最大10件）
+        # Label Cの理由を出力（最大10件）
         if label_c_reasons:
             logger.info("🔍 除外された案件の理由（サンプル10件）")
             logger.info("=" * 60)
