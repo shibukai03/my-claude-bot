@@ -1,4 +1,4 @@
-"""47都道府県 入札・公募ページ全ページ巡回エンジン（v1.3 ページネーション対応）"""
+"""47都道府県 入札・公募ページ全ページ巡回エンジン（v1.4 Google検索救済・ログ強化版）"""
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,17 +13,17 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
-# URLリスト（ユーザー様ご提供のリストを維持）
+# URLリスト
 PREFECTURE_BID_PAGES = {
     "北海道": ["https://www.pref.hokkaido.lg.jp/news/nyusatsu/", "https://www.pref.hokkaido.lg.jp/category/d001/c001/s002/"],
-    "青森県": ["https://www.pref.aomori.lg.jp/soshiki/suito/keiri/buppin-top.html", "https://www.pref.aomori.lg.jp/boshu/"],
+    "青森県": ["https://www.pref.aomori.lg.jp/soshiki/suito/keiri/buppin-top.html", "https://www.pref.aomori.lg.jp/boshu/index_1.html"],
     "岩手県": ["https://www.pref.iwate.jp/kensei/nyuusatsu/it/1024231/index.html", "https://www.pref.iwate.jp/news/1016275.html"],
-    "宮城県": ["https://www.pref.miyagi.jp/life/8/40/105/index.html", "https://www.pref.miyagi.jp/life/proposal/index.html"],
+    "宮城県": ["https://www.pref.miyagi.jp/life/8/40/105/index.html", "https://www.pref.miyagi.jp/soshiki/keiyaku/r7puropo.html"],
     "秋田県": ["https://www.pref.akita.lg.jp/pages/genre/12121", "https://www.pref.akita.lg.jp/pages/genre/12231"],
     "山形県": ["https://www.pref.yamagata.jp/kensei/nyuusatsujouhou/nyuusatsujouhou/jyokyo/index.html", "https://www.pref.yamagata.jp/kensei/nyuusatsujouhou/nyuusatsujouhou/proposal/index.html"],
     "福島県": ["https://www.pref.fukushima.lg.jp/sec/01115c/nyusatsujoho.html", "https://www.pref.fukushima.lg.jp/sec/55015a/suitou-proposal.html"],
-    "茨城県": ["https://www.pref.ibaraki.jp/shiru/nyusatsu-chotatsu/index.html", "https://www.pref.ibaraki.jp/bosyu.html"],
-    "栃木県": ["https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-itaku/index.html", "https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-koukyou/index.html"],
+    "茨城県": ["https://www.pref.ibaraki.jp/shiru/news.html", "https://www.pref.ibaraki.jp/bosyu.html"],
+    "栃木県": ["https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-itaku/index.html", "https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-koukyou/index.html","https://www.pref.tochigi.lg.jp/kensei/nyuusatsu/koubo-buppin/index.html"],
     "群馬県": ["https://www.pref.gunma.jp/site/nyuusatsu/index-2.html", "https://www.pref.gunma.jp/site/nyuusatsu/list135-773.html"],
     "埼玉県": ["https://www.pref.saitama.lg.jp/a0212/kense/tetsuzuki/nyusatsu/buppin/index.html", "https://www.pref.saitama.lg.jp/search/result.html?q=%E5%85%AC%E5%8B%9F&sa=%E6%A4%9C%E7%B4%A2&cx=0898cdc8c417302e4&ie=UTF-8&cof=FORID%3A9"],
     "千葉県": ["https://www.pref.chiba.lg.jp/nyuu-kei/buppin-itaku/index.html", "https://www.pref.chiba.lg.jp/nyuu-kei/buppin-itaku/nyuusatsukoukoku/koukoku/index.html"],
@@ -64,33 +64,51 @@ PREFECTURE_BID_PAGES = {
     "沖縄県": ["https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025064/1037584/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025082/1038049/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025078/1037595/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025067/1037594/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025075/1037593/index.html"]
 }
 
-def get_latest_urls_via_google(pref_name: str) -> List[str]:
+def get_latest_urls_via_google(pref_name: str, base_url: str) -> List[str]:
+    """
+    直接巡回でヒットしなかった場合のGoogle検索バックアップ（キーワード拡張 ＆ ログ強化版）
+    """
     api_key = os.getenv('GOOGLE_API_KEY')
     cx = os.getenv('CUSTOM_SEARCH_ENGINE_ID')
     if not api_key or not cx: return []
-    query = f"{pref_name} 映像制作 委託 公募 site:pref.{pref_name}.lg.jp"
+    
+    # ドメインをURLから抽出（例: pref.miyagi.lg.jp）
+    domain = base_url.split('/')[2]
+    
+    # 🆕 ご要望のキーワードに拡張
+    query = f"site:{domain} (映像 OR 動画 OR 撮影 OR 配信 OR プロモーション) 募集"
+    
+    # 🆕 クエリをログに出力
+    logger.info(f"🔍 Google検索実行: {query}")
+    
     search_url = "https://www.googleapis.com/customsearch/v1"
-    params = {'key': api_key, 'cx': cx, 'q': query, 'num': 3}
+    params = {'key': api_key, 'cx': cx, 'q': query, 'num': 10} # 救済なので上位10件取得
+    
     try:
         response = requests.get(search_url, params=params, timeout=10)
-        return [item['link'] for item in response.json().get('items', [])]
-    except: return []
+        items = response.json().get('items', [])
+        
+        # 🆕 ヒット件数をログに出力
+        logger.info(f"🎯 Google検索結果: {len(items)}件の候補URLを取得しました")
+        
+        return [item['link'] for item in items]
+    except Exception as e:
+        logger.error(f"❌ Google検索中にエラー: {e}")
+        return []
 
 def get_pagination_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
     """ページ内のページネーションリンク（2, 3, 次へ等）を探す"""
     pag_urls = []
-    # 数字のみのリンク、または「次へ」「>」を含むリンクを探す
     for a in soup.find_all('a', href=True):
         text = a.get_text(strip=True)
-        # 1〜10の数字、または特定のキーワード
         if re.match(r'^([2-9]|10)$', text) or "次" in text or ">" in text:
             full_url = urljoin(base_url, a['href'])
-            # 同一ドメイン内かつ、極端に違う階層でないことを確認
             if base_url.split('/')[2] == full_url.split('/')[2]:
                 pag_urls.append(full_url)
-    return list(dict.fromkeys(pag_urls))[:5] # 重複排除して最大5つ追加ページを許可
+    return list(dict.fromkeys(pag_urls))[:5]
 
 def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
+    # Google検索結果もこのキーワードでフィルタリングされます
     keywords = ['動画', '映像', '配信', '撮影', 'プロモーション']
     results = []
     found_pag_urls = []
@@ -101,17 +119,23 @@ def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # 案件リンクの抽出
         for link in soup.find_all('a', href=True):
             text = link.get_text(strip=True)
             parent_text = link.parent.get_text(strip=True) if link.parent else ''
-            if any(k in (text + parent_text) for k in keywords):
+            
+            # 除外キーワード（質問回答などはここで捨てる）
+            exclude_keywords = ["質問", "回答", "公表", "結果", "落札", "入札状況", "R6", "R7", "2024", "2025"]
+            combined_text = (text + parent_text)
+            
+            if any(k in combined_text for k in keywords):
+                # 令和8年を含まない過去年度は除外
+                if any(ex in combined_text for ex in exclude_keywords) and "令和8" not in combined_text:
+                    continue
+                    
                 abs_url = urljoin(url, link['href'])
                 results.append({'title': text or '詳細資料', 'url': abs_url})
         
-        # ページネーションリンクの抽出
         found_pag_urls = get_pagination_urls(soup, url)
-        
         return {"results": results, "pagination": found_pag_urls}
     except Exception as e:
         logger.warning(f"{pref_name}: アクセス失敗({url}) - {e}")
@@ -126,30 +150,30 @@ def search_all_prefectures_direct() -> Dict[str, List[Dict]]:
         visited_pages = set()
         
         page_count = 0
-        while queue and page_count < 10: # 最大10ページまで探索
+        while queue and page_count < 10:
             target_url = queue.pop(0)
             if target_url in visited_pages: continue
             visited_pages.add(target_url)
             page_count += 1
             
             data = scrape_prefecture_page(pref_name, target_url)
-            
-            # 案件を追加
             for res in data["results"]:
                 if res['url'] not in seen_project_urls:
                     seen_project_urls.add(res['url'])
                     pref_combined_results.append(res)
             
-            # 新しく見つかったページネーションをキューに追加
             for p_url in data["pagination"]:
                 if p_url not in visited_pages:
                     queue.append(p_url)
             
             time.sleep(0.5)
 
+        # 🆕 直接巡回で1件も「映像系」が見つからなかった場合のみGoogle検索救済を発動
         if not pref_combined_results:
             logger.info(f"{pref_name}: ヒットなし。Google検索APIで最終救済...")
-            for fb_url in get_latest_urls_via_google(pref_name):
+            # 第一URLのドメインを使って検索
+            google_urls = get_latest_urls_via_google(pref_name, start_urls[0])
+            for fb_url in google_urls:
                 data = scrape_prefecture_page(pref_name, fb_url)
                 for res in data["results"]:
                     if res['url'] not in seen_project_urls:
