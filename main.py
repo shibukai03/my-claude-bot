@@ -60,29 +60,50 @@ def main():
             except Exception as e:
                 logger.warning(f"⚠️ 5分待機... ({e})"); time.sleep(300)
         
-        # 5. 結果解析
+       # 5. 結果解析
         logger.info("【ステップ5】結果解析中...")
         final_projects, stats = [], {"A": 0, "B": 0, "C": 0}
+        excluded_details = []  # 🆕 除外理由を溜める箱
+
         for res in analyzer.client.beta.messages.batches.results(batch_id):
             if res.result.type == "succeeded":
-                analysis = json.loads(re.search(r'\{.*\}', res.result.message.content[0].text, re.DOTALL).group(0))
-                label = analysis.get('label', 'C')
-                stats[label] = stats.get(label, 0) + 1
-                
-                if label in ["A", "B"]:
-                    # タイトル最終検閲: 2026年/令和8年を含まない過去年度キーワードがあれば除外
-                    t = analysis.get('title', '')
-                    if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t:
-                        continue
+                try:
+                    res_text = res.result.message.content[0].text
+                    analysis = json.loads(re.search(r'\{.*\}', res_text, re.DOTALL).group(0))
                     
-                    # 日付チェック
-                    dp = analysis.get('deadline_prop', '不明')
-                    if dp != "不明":
-                        m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', dp)
-                        if m and datetime(*map(int, m.groups())).date() < today: continue
+                    label = analysis.get('label', 'C')
+                    stats[label] = stats.get(label, 0) + 1
+                    t = analysis.get('title', '無題')
+                    
+                    if label in ["A", "B"]:
+                        # 🆕 検閲1: 年度チェック
+                        if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t:
+                            excluded_details.append(f"❌ 過去年度につき除外: {t}")
+                            continue
+                        
+                        # 🆕 検閲2: 期限切れチェック
+                        dp = analysis.get('deadline_prop', '不明')
+                        if dp != "不明":
+                            m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', dp)
+                            if m and datetime(*map(int, m.groups())).date() < today:
+                                excluded_details.append(f"❌ 期限切れ({dp})につき除外: {t}")
+                                continue
 
-                    analysis.update({'source_url': url_map[res.custom_id]['url'], 'prefecture': url_map[res.custom_id]['pref']})
-                    final_projects.append(analysis)
+                        # 🆕 合格したものをログに出す
+                        logger.info(f"✅ 合格判定({label}): {t}")
+
+                        analysis.update({'source_url': url_map[res.custom_id]['url'], 'prefecture': url_map[res.custom_id]['pref']})
+                        final_projects.append(analysis)
+                except: continue
+
+        # 🆕 ループ終了直後：除外リストをガツンと表示
+        if excluded_details:
+            logger.info("=" * 15 + " 最終検閲で除外された案件リスト " + "=" * 15)
+            for detail in excluded_details:
+                logger.info(detail)
+            logger.info("=" * 60)
+            
+        logger.info(f"📊 最終統計 - A:{stats['A']}件, B:{stats['B']}件, C:{stats['C']}件")
         
         # 6. シート書き込み
         if final_projects:
