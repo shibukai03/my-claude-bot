@@ -1,96 +1,71 @@
-"""HTML/PDFコンテンツ抽出（PyMuPDF深層解析エンジン連結版）"""
-
 import requests
 import logging
+import io
+import re
+import pdfplumber
 from bs4 import BeautifulSoup
 from typing import Dict, Optional
 from urllib.parse import urljoin
 import urllib3
-from scrapers.pdf_handler import PDFHandler  # 新エンジンをインポート
 
 # SSLエラー対策
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 logger = logging.getLogger(__name__)
 
 class ContentExtractor:
-    """コンテンツ抽出クラス"""
-    
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.verify = False 
-        # Step 1 で作成したPDF深層解析エンジンを初期化（最大30ページ）
-        self.pdf_handler = PDFHandler(max_pages=30)
 
     def extract(self, url: str) -> Optional[Dict]:
-        """URLからコンテンツを抽出（PDFなら深層解析、HTMLなら中のPDFも深掘り）"""
-        logger.info(f"コンテンツ抽出開始: {url}")
-        
-        # 1. URL自体がPDFを指している場合
-        if url.lower().endswith('.pdf'):
-            return self._extract_pdf_deep(url)
-        
-        # 2. HTMLページの場合（ページ内の重要PDFも深掘りする）
-        return self._extract_html_with_deep_peek(url)
-
-    def _extract_pdf_deep(self, url: str) -> Optional[Dict]:
-        """新エンジンを使用してPDFを最大30ページまで解析する"""
-        text = self.pdf_handler.extract_text_from_url(url)
-        if not text:
-            return None
-            
-        return {
-            'url': url,
-            'title': url.split('/')[-1],
-            'content': text, # ここではカットせず、AIに渡す直前で制御します
-            'file_type': 'pdf'
-        }
-
-    def _extract_html_with_deep_peek(self, url: str) -> Optional[Dict]:
-        """HTMLを解析し、関連PDFがあれば新エンジンで全ページ解析して合流させる"""
         try:
             response = self.session.get(url, timeout=30, verify=self.verify)
-            response.raise_for_status()
-            # 文字化け対策
             response.encoding = response.apparent_encoding
-            
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # タイトルの取得
-            title = soup.title.string.strip() if soup.title else url
-            
-            # 不要なタグを除去
             for tag in soup(['script', 'style', 'nav', 'header', 'footer']):
                 tag.decompose()
-            main_text = soup.get_text(separator='\n', strip=True)
             
-            # --- 深掘り機能：重要なPDFリンクを1つだけ「全ページ」解析する ---
-            extra_pdf_text = ""
+            # Webページ本文
+            main_text = f"【Web本文】\n{soup.get_text(separator=' ', strip=True)[:3000]}\n"
+            
+            # PDFリンクの抽出と選別
+            combined_pdf_text = ""
             for link in soup.find_all('a', href=True):
                 href = link['href']
                 link_text = link.get_text()
                 
-                # キーワードに合致するPDFを探す
-                if href.lower().endswith('.pdf') and any(k in link_text for k in ['要領', '募集', '概要', '仕様', '指針']):
+                if href.lower().endswith('.pdf'):
+                    # 🆕 ノイズPDF（結果、回答、様式など）は読み飛ばす
+                    if any(x in link_text for x in ['質問', '回答', '結果', '落札', '様式', '記入例', '名簿']):
+                        continue
+                        
                     pdf_url = urljoin(url, href)
-                    logger.info(f"🔍 重要資料PDFを深層解析します: {link_text}")
+                    combined_pdf_text += self._extract_future_pages(pdf_url)
                     
-                    # 以前の5ページ制限を撤廃した新エンジンで解析
-                    pdf_data = self._extract_pdf_deep(pdf_url)
-                    if pdf_data and pdf_data['content']:
-                        extra_pdf_text = f"\n\n--- 付属資料PDF({link_text})の全容 ---\n{pdf_data['content']}"
-                        break # 最も重要な1つを深掘りしたら終了
+                    if len(main_text + combined_pdf_text) > 12000: break
 
-            return {
-                'url': url,
-                'title': title,
-                'content': main_text + extra_pdf_text,
-                'file_type': 'html'
-            }
-            
+            return {'url': url, 'content': main_text + combined_pdf_text}
         except Exception as e:
-            logger.error(f"HTML抽出エラー: {url} - {e}")
+            logger.error(f"抽出失敗: {url} - {e}")
             return None
+
+    def _extract_future_pages(self, pdf_url):
+        """PDF全ページを走査し、2026年(R8)以降の記述やスケジュールがあるページを抜粋"""
+        try:
+            res = self.session.get(pdf_url, timeout=20, verify=self.verify)
+            extracted = f"\n--- PDF: {pdf_url.split('/')[-1]} ---\n"
+            with pdfplumber.open(io.BytesIO(res.content)) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    # 🆕 2026年以降、令和8年以降、またはスケジュール単語を検索
+                    future_yr = re.search(r"(202[6-9]|20[3-9][0-9]|令和[8-9]|令和[1-2][0-9]|R[8-9]|R[1-2][0-9])", text)
+                    is_sch = any(k in text for k in ["スケジュール", "期間", "期限", "締切", "提出", "実施"])
+                    if future_yr or is_sch:
+                        extracted += text + "\n"
+                        if len(extracted) > 4000: break
+            return extracted
+        except: return ""
