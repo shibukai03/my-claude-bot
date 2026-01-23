@@ -5,7 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SheetsManager:
-    # 指示書 v1.2 準拠の16項目
+    # 指示書 v1.2 準拠の16項目 (変更なし)
     HEADER = [
         "案件ID", "ラベル", "発注主体", "都道府県/市区町村", "件名", 
         "方式", "予算上限/予定価格", "履行期間", 
@@ -30,6 +30,8 @@ class SheetsManager:
             
             ws = self.spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="20")
             ws.append_row(self.HEADER)
+            # ヘッダーを強調（太字 + グレー背景）
+            ws.format('A1:P1', {'textFormat': {'bold': True}, 'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}})
             return ws
         except Exception as e:
             logger.error(f"シート準備エラー: {e}")
@@ -39,11 +41,24 @@ class SheetsManager:
         """A/Bラベルの案件をスプレッドシートに一括追加"""
         rows_to_add = []
         for i, p in enumerate(projects, 1):
+            # 🆕 AI側のキー名 (deadline_apply 等) と一致するように修正
             row = [
-                i, p.get('label'), p.get('prefecture'), p.get('prefecture'), p.get('title'),
-                p.get('method'), p.get('budget'), p.get('period'),
-                p.get('deadline_app'), p.get('deadline_ques'), p.get('deadline_prop'),
-                p.get('source_url'), p.get('source_url'), p.get('evidence'), p.get('tag'), p.get('memo')
+                i,                                      # 案件ID
+                p.get('label', ''),                     # ラベル
+                p.get('prefecture', '不明'),             # 発注主体
+                p.get('prefecture', '不明'),             # 都道府県/市区町村
+                p.get('title', '無題'),                  # 件名
+                p.get('method', '公募型プロポーザル'),     # 方式
+                p.get('budget', '資料参照'),             # 予算上限/予定価格
+                p.get('period', '資料参照'),             # 履行期間
+                p.get('deadline_apply', '不明'),         # 🆕 締切(参加申込) ※キー名を合わせました
+                p.get('deadline_ques', '不明'),          # 締切(質問)
+                p.get('deadline_prop', '不明'),          # 締切(提案書)
+                p.get('source_url', ''),                # 公告URL
+                p.get('source_url', ''),                # 添付資料URL
+                p.get('evidence', ''),                  # 映像要件の根拠(Evidence)
+                "映像・プロモーション",                    # タグ
+                p.get('memo', '')                       # メモ
             ]
             rows_to_add.append(row)
         
