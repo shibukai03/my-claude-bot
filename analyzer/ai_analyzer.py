@@ -13,6 +13,7 @@ class AIAnalyzer:
         self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022')
         logger.info(f"AI解析ユニット起動完了")
     
+    # 🆕 url引数を追加
     def get_prompt(self, title: str, content: str, url: str) -> str:
         jst = timezone(timedelta(hours=9))
         now = datetime.now(jst)
@@ -30,7 +31,7 @@ class AIAnalyzer:
 4. **令和{r_year}年の不在**: 本文に令和{r_year}年(2026)以降の具体的な日付が一切ない過去の残骸。
 
 # 判定基準
-- **Label A**: 映像・動画・配信等が主業務。
+- **Label A**: 映像制作・動画作成・配信等が主業務。
 - **Label B**: 広報やイベントの一部に映像制作が含まれる。
 
 # 出力形式 (JSON)
@@ -40,6 +41,7 @@ class AIAnalyzer:
   "source_url": "{url}", 
   "deadline_apply": "参加申込の締切日 YYYY-MM-DD (不明時は 不明)",
   "deadline_prop": "YYYY-MM-DD (不明時は 不明)",
+  "prefecture": "対象の都道府県名",
   "evidence": "映像制作の必要性と現在募集中である根拠",
   "memo": "令和{r_year}年度案件、等の詳細ステータス"
 }}
@@ -49,6 +51,7 @@ class AIAnalyzer:
 内容: {content[:13000]}
 """
 
+    # 🆕 url引数を追加
     def make_batch_request(self, custom_id: str, title: str, content: str, url: str) -> Dict:
         return {
             "custom_id": custom_id,
