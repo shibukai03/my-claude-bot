@@ -25,7 +25,24 @@ def main():
         extractor = ContentExtractor()
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst).date()
+
+        # 🆕 スマート再開チェック: まだ終わっていないBatchがあるか確認
+        batch_id = None
+        url_map = {} # 再開時はAIの回答内データを使用するため空でOK
         
+        existing_batches = analyzer.client.beta.messages.batches.list(limit=5)
+        for b in existing_batches.data:
+            if b.processing_status in ["in_progress", "canceling"]:
+                logger.info(f"🔄 前回の未完了バッチを継続します: {b.id}")
+                batch_id = b.id
+                break
+            elif b.processing_status == "ended" and (datetime.now(timezone.utc) - b.created_at).total_seconds() < 3600:
+                logger.info(f"✅ 直近で完了したバッチを発見しました: {b.id}")
+                batch_id = b.id
+                break
+
+        # 未完了バッチがない場合のみ、新規スクレイピングを実行
+        if not batch_id:
         # 1. リンク収集
         logger.info("【ステップ1】全国リンク収集開始")
         prefecture_results = search_all_prefectures_direct()
