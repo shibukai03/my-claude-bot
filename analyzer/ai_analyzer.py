@@ -38,6 +38,7 @@ class AIAnalyzer:
 {{
   "label": "A, B, または C",
   "title": "案件名",
+  "source_url": "提供された情報のURL", 
   "deadline_apply": "参加申込の締切日 YYYY-MM-DD (不明時は 不明)",
   "deadline_prop": "YYYY-MM-DD (不明時は 不明)",
   "evidence": "映像制作の必要性と現在募集中である根拠",
