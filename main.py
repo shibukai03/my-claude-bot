@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.7 [再開機能・参加申込対応]")
+    logger.info("映像案件スクレイピング v1.8 [再開・重複排除・参加申込対応]")
     logger.info("=" * 60)
     
     try:
@@ -26,17 +26,13 @@ def main():
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst).date()
 
-        # 🆕 再開チェック：未完了または完了直後のバッチを探す
+        # 🆕 【救済】未完了バッチがないか確認
         batch_id = None
         url_map = {} 
-        
         existing_batches = analyzer.client.beta.messages.batches.list(limit=5)
         for b in existing_batches.data:
-            if b.processing_status != "ended":
-                logger.info(f"🔄 未完了バッチを発見。再開します: {b.id}")
-                batch_id = b.id; break
-            elif (datetime.now(timezone.utc) - b.created_at).total_seconds() < 14400: # 4時間以内
-                logger.info(f"✅ 直近のバッチを処理します: {b.id}")
+            if b.processing_status != "ended" or (datetime.now(timezone.utc) - b.created_at).total_seconds() < 14400:
+                logger.info(f"🔄 救済対象バッチを発見: {b.id}")
                 batch_id = b.id; break
 
         if not batch_id:
@@ -53,8 +49,10 @@ def main():
                 if i % 20 == 0: logger.info(f"進捗: {i}/{len(all_tasks)}")
                 content_data = extractor.extract(task['url'])
                 if not content_data: continue
+                
                 cid = f"req_{i}"
-                url_map[cid] = task # 実行中の保存用
+                url_map[cid] = task
+                # 🆕 AIにURLも渡す
                 batch_requests.append(analyzer.make_batch_request(cid, task['title'], content_data['content'], task['url']))
             
             # 3. Batch送信
@@ -62,7 +60,7 @@ def main():
             batch = analyzer.client.beta.messages.batches.create(requests=batch_requests)
             batch_id = batch.id
         else:
-            logger.info("⏭️ 解析結果の待機・取得ステップへジャンプします")
+            logger.info("⏭️ 収集ステップをスキップし、解析結果の処理へ進みます")
 
         # 4. 完了待機
         logger.info("【ステップ4】AI解析待ち...")
@@ -73,12 +71,12 @@ def main():
                 if b_status.processing_status == "ended": break
                 time.sleep(60)
             except Exception as e:
-                logger.warning(f"⚠️ 待機中エラー(5分待機): {e}"); time.sleep(300)
+                logger.warning(f"⚠️ 5分待機... ({e})"); time.sleep(300)
         
         # 5. 結果解析
         logger.info("【ステップ5】結果解析中...")
         final_projects, stats = [], {"A": 0, "B": 0, "C": 0}
-        excluded_details = []
+        seen_titles = set() # 🆕 重複排除用
 
         for res in analyzer.client.beta.messages.batches.results(batch_id):
             if res.result.type == "succeeded":
@@ -88,40 +86,26 @@ def main():
                     stats[label] = stats.get(label, 0) + 1
                     t = analysis.get('title', '無題')
                     
+                    if t in seen_titles: continue # 🆕 重複はスキップ
+
                     if label in ["A", "B"]:
                         # 最終検閲
-                        if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t:
-                            excluded_details.append(f"❌ 過去年度: {t}"); continue
-                        
+                        if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t: continue
                         dp = analysis.get('deadline_prop', '不明')
                         if dp != "不明":
                             m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', dp)
-                            if m and datetime(*map(int, m.groups())).date() < today:
-                                excluded_details.append(f"❌ 期限切れ({dp}): {t}"); continue
+                            if m and datetime(*map(int, m.groups())).date() < today: continue
 
                         logger.info(f"✅ 合格判定({label}): {t}")
+                        seen_titles.add(t) # 🆕 記録
                         
-                        # 🆕 再開時のURL・都道府県の補完ロジック
+                        # URL復元ロジック
                         if res.custom_id in url_map:
-                            analysis.update({
-                                'source_url': url_map[res.custom_id]['url'], 
-                                'prefecture': url_map[res.custom_id]['pref']
-                            })
-                        else:
-                            # メモリにURLがない（再開時）はAIが抽出したURLと都道府県を使用
-                            analysis.update({
-                                'source_url': analysis.get('source_url', 'URLは元サイトで確認'),
-                                'prefecture': analysis.get('prefecture', '不明')
-                            })
-
+                            analysis.update({'prefecture': url_map[res.custom_id]['pref']})
+                        
                         final_projects.append(analysis)
                 except: continue
-
-        if excluded_details:
-            logger.info("=" * 15 + " 除外案件リスト " + "=" * 15)
-            for detail in excluded_details: logger.info(detail)
-            logger.info("=" * 60)
-            
+        
         # 6. シート書き込み
         if final_projects:
             sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v16")
