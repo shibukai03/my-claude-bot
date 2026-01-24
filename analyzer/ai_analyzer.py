@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Dict
+import json
+import re
+from typing import Dict, Optional
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,6 @@ class AIAnalyzer:
         self.model = os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022')
         logger.info(f"AI解析ユニット起動完了")
     
-    # 🆕 url引数を追加
     def get_prompt(self, title: str, content: str, url: str) -> str:
         jst = timezone(timedelta(hours=9))
         now = datetime.now(jst)
@@ -51,7 +52,6 @@ class AIAnalyzer:
 内容: {content[:13000]}
 """
 
-    # 🆕 url引数を追加
     def make_batch_request(self, custom_id: str, title: str, content: str, url: str) -> Dict:
         return {
             "custom_id": custom_id,
@@ -62,3 +62,18 @@ class AIAnalyzer:
                 "messages": [{"role": "user", "content": self.get_prompt(title, content, url)}]
             }
         }
+
+    def analyze_single(self, title: str, content: str, url: str) -> Optional[Dict]:
+        """🆕 追加：通常APIを使用して即座に解析する（救済用）"""
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=1000,
+                temperature=0,
+                messages=[{"role": "user", "content": self.get_prompt(title, content, url)}]
+            )
+            res_text = message.content[0].text
+            return json.loads(re.search(r'\{.*\}', res_text, re.DOTALL).group(0))
+        except Exception as e:
+            logger.error(f"通常API解析エラー: {e}")
+            return None
