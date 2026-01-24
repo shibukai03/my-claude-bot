@@ -12,8 +12,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def main():
+    start_time = time.time() # 🆕 開始時刻を記録
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.8 [再開・重複排除・参加申込対応]")
+    logger.info("映像案件スクレイピング v1.10 [Batch/通常APIハイブリッド版]")
     logger.info("=" * 60)
     
     try:
@@ -26,7 +27,7 @@ def main():
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst).date()
 
-        # 🆕 【救済】未完了バッチがないか確認
+        # 【救済】未完了バッチがないか確認
         batch_id = None
         url_map = {} 
         existing_batches = analyzer.client.beta.messages.batches.list(limit=5)
@@ -51,8 +52,8 @@ def main():
                 if not content_data: continue
                 
                 cid = f"req_{i}"
-                url_map[cid] = task
-                # 🆕 AIにURLも渡す
+                # 救済用に content も保持するよう追加
+                url_map[cid] = {**task, 'content': content_data['content']}
                 batch_requests.append(analyzer.make_batch_request(cid, task['title'], content_data['content'], task['url']))
             
             # 3. Batch送信
@@ -62,13 +63,21 @@ def main():
         else:
             logger.info("⏭️ 収集ステップをスキップし、解析結果の処理へ進みます")
 
-        # 4. 完了待機
+        # 4. 完了待機 ＋ 5時間タイマー
         logger.info("【ステップ4】AI解析待ち...")
+        use_fallback = False
         while True:
             try:
                 b_status = analyzer.client.beta.messages.batches.retrieve(batch_id)
-                logger.info(f"⏳ {b_status.processing_status}: {b_status.request_counts.succeeded}件完了")
                 if b_status.processing_status == "ended": break
+                
+                # 🆕 5時間(18,000秒)を超えたか判定
+                if (time.time() - start_time) > 18000:
+                    logger.warning("⚠️ 5時間を経過してもBatchが完了しません。通常APIによる即時解析に切り替えます。")
+                    use_fallback = True
+                    break
+                
+                logger.info(f"⏳ {b_status.processing_status}: {b_status.request_counts.succeeded}件完了")
                 time.sleep(60)
             except Exception as e:
                 logger.warning(f"⚠️ 5分待機... ({e})"); time.sleep(300)
@@ -76,41 +85,58 @@ def main():
         # 5. 結果解析
         logger.info("【ステップ5】結果解析中...")
         final_projects, stats = [], {"A": 0, "B": 0, "C": 0}
-        seen_titles = set() # 🆕 重複排除用
+        seen_titles = set()
 
-        for res in analyzer.client.beta.messages.batches.results(batch_id):
-            if res.result.type == "succeeded":
-                try:
-                    analysis = json.loads(re.search(r'\{.*\}', res.result.message.content[0].text, re.DOTALL).group(0))
-                    label = analysis.get('label', 'C')
-                    stats[label] = stats.get(label, 0) + 1
-                    t = analysis.get('title', '無題')
-                    
-                    if t in seen_titles: continue # 🆕 重複はスキップ
-
-                    if label in ["A", "B"]:
-                        # 最終検閲
-                        if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t: continue
-                        dp = analysis.get('deadline_prop', '不明')
-                        if dp != "不明":
-                            m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', dp)
-                            if m and datetime(*map(int, m.groups())).date() < today: continue
-
-                        logger.info(f"✅ 合格判定({label}): {t}")
-                        seen_titles.add(t) # 🆕 記録
+        if use_fallback:
+            # 🆕 救済モード：キャッシュされたデータを使って通常APIを叩く
+            if not url_map:
+                logger.error("❌ 救済モードに切り替えましたが、解析用データがメモリにありません。再実行が必要です。")
+            else:
+                for cid, task in url_map.items():
+                    analysis = analyzer.analyze_single(task['title'], task['content'], task['url'])
+                    if analysis:
+                        label = analysis.get('label', 'C')
+                        t = analysis.get('title', '無題')
+                        if label in ["A", "B"] and t not in seen_titles:
+                            logger.info(f"✨ 通常API救済判定({label}): {t}")
+                            analysis.update({'prefecture': task['pref']})
+                            final_projects.append(analysis)
+                            seen_titles.add(t)
+                    time.sleep(1) # レート制限対策
+        else:
+            # 通常モード：Batchの結果を処理
+            for res in analyzer.client.beta.messages.batches.results(batch_id):
+                if res.result.type == "succeeded":
+                    try:
+                        analysis = json.loads(re.search(r'\{.*\}', res.result.message.content[0].text, re.DOTALL).group(0))
+                        label = analysis.get('label', 'C')
+                        stats[label] = stats.get(label, 0) + 1
+                        t = analysis.get('title', '無題')
                         
-                        # URL復元ロジック
-                        if res.custom_id in url_map:
-                            analysis.update({'prefecture': url_map[res.custom_id]['pref']})
-                        
-                        final_projects.append(analysis)
-                except: continue
-        
+                        if t in seen_titles: continue
+                        if label in ["A", "B"]:
+                            # 最終検閲（年度・期限）
+                            if re.search(r"令和[5-7]|R[5-7]|202[3-5]", t) and "令和8" not in t: continue
+                            dp = analysis.get('deadline_prop', '不明')
+                            if dp != "不明":
+                                m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', dp)
+                                if m and datetime(*map(int, m.groups())).date() < today: continue
+
+                            logger.info(f"✅ 合格判定({label}): {t}")
+                            seen_titles.add(t)
+                            
+                            # URL/都道府県の復元
+                            if res.custom_id in url_map:
+                                analysis.update({'prefecture': url_map[res.custom_id]['pref'], 'source_url': url_map[res.custom_id]['url']})
+                            
+                            final_projects.append(analysis)
+                    except: continue
+
         # 6. シート書き込み
         if final_projects:
             sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v16")
             sheets_manager.append_projects(sheets_manager.prepare_v12_sheet(sheet_name), final_projects)
-            logger.info(f"✨ 完了！ {len(final_projects)}件を追加 (A:{stats['A']}, B:{stats['B']})")
+            logger.info(f"✨ 完了！ {len(final_projects)}件を追加しました")
         else: logger.warning("⚠️ 新着案件なし")
         
     except Exception as e: logger.error(f"❌ エラー: {e}")
