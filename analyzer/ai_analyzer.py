@@ -12,39 +12,45 @@ class AIAnalyzer:
         api_key = os.getenv('ANTHROPIC_API_KEY')
         from anthropic import Anthropic
         self.client = Anthropic(api_key=api_key)
-        self.model = "claude-3-haiku-20240307"
-        logger.info(f"AI解析ユニット起動完了")
+        # 🚀 修正：確定した最新モデル ID を使用
+        self.model = "claude-haiku-4-5-20251001" 
+        logger.info(f"AI解析ユニット(Claude 4.5 Haiku)起動完了")
     
     def get_prompt(self, title: str, content: str, url: str) -> str:
         jst = timezone(timedelta(hours=9))
-        now = datetime.now(jst)
-        today_str = now.strftime('%Y-%m-%d')
-        r_year = now.year - 2018
-        last_r = r_year - 1
-        last_w = now.year - 1
+        today = datetime.now(jst)
+        today_str = today.strftime('%Y-%m-%d')
+        r_year = today.year - 2018
         
-        return f"""あなたは自治体案件の精査プロです。今日: {today_str} (令和{r_year}年)
+        return f"""あなたは自治体入札案件のプロ査定士です。今日: {today_str} (令和{r_year}年)
 
-# 🚨 絶対除外ルール (Label C)
-1. **過去年度**: タイトルや本文が「令和{last_r}年({last_w})」以前の募集。
-2. **ノイズ**: 「質問回答(Q&A)」「選定結果」「入札結果」のページ。
-3. **期限切れ**: 締切が今日({today_str})より前の日付。
-4. **令和{r_year}年の不在**: 本文に令和{r_year}年(2026)以降の具体的な日付が一切ない過去の残骸。
+# 🎯 判定ミッション
+Webページから「映像制作・動画制作・ライブ配信」の業務委託を探してください。
 
-# 判定基準
-- **Label A**: 映像制作・動画作成・配信等が主業務。
-- **Label B**: 広報やイベントの一部に映像制作が含まれる。
+# ❌ 絶対除外ルール (Label C)
+1. **物品の購入**: カメラ、モニター、ドローン、医療機器等の「モノの買い入れ」は除外。
+2. **システムの構築**: サーバーやネットワーク、ソフトウェア導入のみの案件。
+3. **過去・終了案件**: 令和7年(2025)以前のもの、または「選定結果」等の事後報告。
+4. **人材募集**: 職員採用、試験案内など。
+
+# ✅ 採用基準
+- **Label A**: 動画制作、撮影業務が主目的。
+- **Label B**: イベントや事務事業の一部に映像制作が含まれる。
+
+# ⚠️ 令和8年(2026) 厳守
+- 本文に「令和8年」または「2026年」という具体的な未来の予定・期限があること。
+- 令和6年や令和7年が主役の案件は全て Label C としてください。
 
 # 出力形式 (JSON)
 {{
   "label": "A, B, または C",
-  "title": "案件名",
+  "title": "正式な案件名",
   "source_url": "{url}", 
-  "deadline_apply": "参加申込の締切日 YYYY-MM-DD (不明時は 不明)",
+  "deadline_apply": "YYYY-MM-DD (不明時は 不明)",
   "deadline_prop": "YYYY-MM-DD (不明時は 不明)",
-  "prefecture": "対象の都道府県名",
+  "prefecture": "自治体名",
   "evidence": "映像制作の必要性と現在募集中である根拠",
-  "memo": "令和{r_year}年度案件、等の詳細ステータス"
+  "memo": "令和{r_year}年度(2026)案件であることを確認済み"
 }}
 
 ---
@@ -52,19 +58,7 @@ class AIAnalyzer:
 内容: {content[:13000]}
 """
 
-    def make_batch_request(self, custom_id: str, title: str, content: str, url: str) -> Dict:
-        return {
-            "custom_id": custom_id,
-            "params": {
-                "model": self.model,
-                "max_tokens": 1000,
-                "temperature": 0,
-                "messages": [{"role": "user", "content": self.get_prompt(title, content, url)}]
-            }
-        }
-
     def analyze_single(self, title: str, content: str, url: str) -> Optional[Dict]:
-        """🆕 追加：通常APIを使用して即座に解析する（救済用）"""
         try:
             message = self.client.messages.create(
                 model=self.model,
@@ -73,7 +67,10 @@ class AIAnalyzer:
                 messages=[{"role": "user", "content": self.get_prompt(title, content, url)}]
             )
             res_text = message.content[0].text
-            return json.loads(re.search(r'\{.*\}', res_text, re.DOTALL).group(0))
+            match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            return None
         except Exception as e:
-            logger.error(f"通常API解析エラー: {e}")
+            logger.error(f"解析エラー: {e}")
             return None
