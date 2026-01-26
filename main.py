@@ -59,7 +59,7 @@ def main():
             try:
                 b_status = analyzer.client.beta.messages.batches.retrieve(batch_id)
                 if b_status.processing_status == "ended": break
-                if (time.time() - start_time) > 18000:
+                if (time.time() - start_time) > 10800:
                     logger.warning("⚠️ 5時間経過。Haikuリアルタイム解析に切り替えます")
                     use_fallback = True; break
                 logger.info(f"⏳ {b_status.processing_status}: {b_status.request_counts.succeeded}件完了")
