@@ -12,7 +12,7 @@ class AIAnalyzer:
         api_key = os.getenv('ANTHROPIC_API_KEY')
         from anthropic import Anthropic
         self.client = Anthropic(api_key=api_key)
-        self.model = "claude-3-5-haiku-20241022"
+        self.model = "claude-3-haiku-20240307"
         logger.info(f"AI解析ユニット起動完了")
     
     def get_prompt(self, title: str, content: str, url: str) -> str:
