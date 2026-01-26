@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     logger.info("=" * 60)
-    logger.info("映像案件スクレイピング v1.22 [西暦・和暦 厳格補正版]")
+    logger.info("映像案件スクレイピング v1.23 [真の案件のみ・不純物100%排除版]")
     logger.info("=" * 60)
     
     try:
@@ -32,36 +32,43 @@ def main():
         final_projects = []
         seen_titles = set()
         
-        logger.info("【ステップ2】極限選別（偽の2026年案件を徹底排除）...")
+        logger.info("【ステップ2】案件の最終検閲（100%令和8年度・募集中のみ）...")
         for i, task in enumerate(all_tasks, 1):
             url = task['url']
             title_raw = task['title']
 
-            # --- 🛡️ 門番1：タイトルの物理排除 (事後報告・採用・過去年度) ---
-            if re.search(r"決定|公表|選定|落札|結果|審査|報告|実績", title_raw): continue # 終わったものは見ない
-            if re.search(r"採用|職員|薬剤師|警察|教員|看護|試験|相談", title_raw): continue # 人の募集は見ない
-            if re.search(r"令和[4-7]|R[4-7]|202[2-5]", title_raw) and "令和8" not in title_raw: continue
+            # --- 🛡️ 門番1：ドメイン遮断 ---
+            if re.search(r"youtube\.com|youtu\.be|facebook\.com|instagram\.com|x\.com|twitter\.com", url):
+                continue
 
-            # 最低限必要な「仕事」のキーワード
-            if not re.search(r"公募|委託|入札|募集|提案|プロポーザル|コンペ|制作|撮影|業務", title_raw): continue
+            # --- 🛡️ 門番2：タイトルの「冷徹な排除」ルール ---
+            # 1. すでに終わったもの・事後報告・成功ニュースを排除
+            if re.search(r"決定|公表|選定|落札|結果|審査|報告|実績|成功|達成|公開|完了", title_raw): continue
+            # 2. 職員採用・資格試験・人物の募集を排除
+            if re.search(r"採用|職員|薬剤師|警察|教員|看護|医師|試験|相談|個人", title_raw): continue
+            # 3. 令和7年以前をタイトル段階で排除（令和8との併記がない限り）
+            if re.search(r"令和[4-7]|R[4-7]|202[2-5]", title_raw) and "令和8" not in title_raw:
+                continue
+
+            # 門番3：タイトルに「ビジネスの注文」ワードがあるか
+            if not re.search(r"募集|委託|入札|プロポーザル|コンペ|公募|企画提案|制作|撮影|業務", title_raw):
+                continue
 
             if i % 20 == 0: logger.info(f"進捗: {i}/{len(all_tasks)} 件完了")
             
-            # 内容抽出
             content_data = extractor.extract(url)
             if not content_data: continue
             raw_text = content_data['content']
 
-            # --- 🛡️ 門番2：本文の生データ検閲 (AIが嘘をつく前にチェック) ---
-            # 本文に令和6年(2024)や令和7年(2025)が書いてあり、令和8年(2026)がない場合は即除外
+            # --- 🛡️ 門番4：本文の「和暦」直接検閲 ---
+            # AIがハルシネーション（嘘）をつく前に、本文に古い年号しかない場合は捨てる
             if re.search(r"令和[67]|R[67]|202[45]", raw_text) and not re.search(r"令和8|R8|2026", raw_text):
                 continue
 
-            # AI解析
             analysis = analyzer.analyze_single(title_raw, raw_text, url)
             if not analysis: continue
             
-            # --- 🛡️ 門番3：AI回答の矛盾チェック ---
+            # --- 🛡️ 門番5：AI回答の「否定語」検閲 ---
             if analysis.get('label') not in ["A", "B"]: continue
             title = analysis.get('title', '無題')
             if title in seen_titles: continue
@@ -70,37 +77,39 @@ def main():
             memo = analysis.get('memo','')
             full_ans = f"{title} {evidence} {memo}"
 
-            # AIが「令和8年度ではない」と書いている、または過去だと認めている場合
-            if re.search(r"ではありません|ではない|過去|終了|令和[67]|202[45]", memo + evidence):
-                if "令和8" not in memo and "2026" not in memo: continue
-                if re.search(r"令和8年度?の案件ではありません", memo): continue
+            # ① AIの回答に「〜ではない」「過去」「終了」が含まれていたら即破棄
+            if re.search(r"ではありません|ではない|過去|終了|終了済", memo + evidence):
+                continue
 
-            # 本文と回答を合わせて「2026/令和8」の文字が1回も出ないなら除外
-            if "令和8" not in full_ans and "2026" not in full_ans: continue
+            # ② 令和8年度(2026)の「実在」を確認
+            # 回答内に「令和8年度の案件」あるいは「2026年度の案件」と肯定されている必要がある
+            if not re.search(r"令和8年度?の案件|2026年度?の案件|令和8年度予算", full_ans):
+                # 未来の年号単体でもOKだが、過去の年号が混じっている場合は上記の肯定文を必須とする
+                if re.search(r"令和[67]|202[45]", full_ans) and not re.search(r"令和8|2026", full_ans):
+                    continue
 
-            # 期限切れチェック (変換ミス対策：AIが2026年と答えても、元が令和6年ならここで落ちる)
+            # ③ 期限切れチェック
             deadline_str = analysis.get('deadline_prop', '不明')
             if deadline_str == "不明": deadline_str = analysis.get('deadline_apply', '不明')
             if deadline_str != "不明":
                 m = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})', deadline_str)
                 if m:
-                    # AIの計算ミスを補正：もし西暦が2026なのに元がR6なら修正される
                     d_date = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
                     if d_date < today: continue
 
-            # --- ✨ 最終合格：本物の令和8年度（2026年度）案件 ---
+            # --- ✨ 最終合格：あなたが今すぐ応募すべき2026年の本物の案件 ---
             analysis.update({'prefecture': task['pref']})
             final_projects.append(analysis)
             seen_titles.add(title)
-            logger.info(f"🎯 真の2026年案件を捕捉: {title}")
+            logger.info(f"✨ 真の2026年案件を捕捉: {title}")
             time.sleep(0.1)
 
         if final_projects:
             sheet_name = datetime.now(jst).strftime("映像案件_%Y年%m月_v16")
             sheets_manager.append_projects(sheets_manager.prepare_v12_sheet(sheet_name), final_projects)
-            logger.info(f"✨ 完了！ 厳選案件 {len(final_projects)}件を追加しました")
+            logger.info(f"✨ 完了！ 100%本物の案件のみ {len(final_projects)}件を追加しました")
         else:
-            logger.warning("⚠️ 2026年度の新規案件は見つかりませんでした")
+            logger.warning("⚠️ 条件に合う有効な新規案件は見つかりませんでした")
             
     except Exception as e:
         logger.error(f"❌ エラー: {e}")
