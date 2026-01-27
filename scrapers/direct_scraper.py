@@ -129,7 +129,7 @@ def get_pagination_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
 
 def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
     # Google検索結果もこのキーワードでフィルタリングされます
-    keywords = ['動画', '映像', '配信', '撮影', 'プロモーション',"作成]
+    keywords = ['動画', '映像', '配信', '撮影', 'プロモーション', '作成']
     results = []
     found_pag_urls = []
     try:
