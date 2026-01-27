@@ -62,6 +62,26 @@ PREFECTURE_BID_PAGES = {
     "宮崎県": ["https://www.pref.miyazaki.lg.jp/kense/chotatsu/index.html", "https://www.pref.miyazaki.lg.jp/kense/chotatsu/itaku/kikakutean/index.html"],
     "鹿児島県": ["https://www.pref.kagoshima.jp/kensei/nyusatsu/nyusatujoho/index.html", "https://www.pref.kagoshima.jp/jigyosha/saishin/index.html", "https://www.pref.kagoshima.jp/search/result.html?q=%E5%85%AC%E5%8B%9F&sa=%E6%A4%9C%E7%B4%A2&cx=010935469551604429717%3Afammeppf88m&ie=UTF-8&cof=FORID%3A9"],
     "沖縄県": ["https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025064/1037584/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025082/1038049/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025078/1037595/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025067/1037594/index.html", "https://www.pref.okinawa.jp/shigoto/nyusatsukeiyaku/1015342/1025075/1037593/index.html"]
+    "札幌市": ["https://www.city.sapporo.jp/keiyaku/itaku/index.html"],
+    "仙台市": ["https://www.city.sendai.jp/business/nyusatsu/index.html"],
+    "さいたま市": ["https://www.city.saitama.lg.jp/005/001/011/index.html"],
+    "千葉市": ["https://www.city.chiba.jp/zaiseikyoku/zaisei/keiyaku/itakukokoku.html"],
+    "横浜市": ["https://www.city.yokohama.lg.jp/business/nyusatsu/kakukukyoku/2026/itaku/"],
+    "川崎市": ["https://www.city.kawasaki.jp/shisei/category/51-1-0-0-0-0-0-0-0-0.html"],
+    "相模原市": ["https://www.city.sagamihara.kanagawa.jp/sangyo/nyusatsu/1026857/index.html"],
+    "新潟市": ["https://www.city.niigata.lg.jp/business/nyusatsu/index.html"],
+    "静岡市": ["https://www.city.shizuoka.lg.jp/s7253/s002166.html"],
+    "浜松市": ["https://www.city.hamamatsu.shizuoka.jp/keiyaku/nyusatsu/index.html"],
+    "名古屋市": ["https://www.city.nagoya.jp/shisei/category/74-12-0-0-0-0-0-0-0-0.html"],
+    "京都市": ["https://www.city.kyoto.lg.jp/contents/pbi/index.html"],
+    "大阪市": ["https://www.city.osaka.lg.jp/templates/proposal_hattyuuannkenn/0-Curr.html"],
+    "堺市": ["https://www.city.sakai.lg.jp/sangyo/nyusatsu/index.html"],
+    "神戸市": ["https://www.city.kobe.lg.jp/a30145/business/bidding/itaku/index.html"],
+    "岡山市": ["https://www.city.okayama.jp/category/00001552.html"],
+    "広島市": ["https://www.city.hiroshima.lg.jp/site/nyusatsu/"],
+    "北九州市": ["https://www.city.kitakyushu.lg.jp/shiseidatsu/menu05_0001.html"],
+    "福岡市": ["https://www.city.fukuoka.lg.jp/zaisei/keiyaku/business/buppin-itaku/index.html"],
+    "熊本市": ["https://www.city.kumamoto.jp/hpkiji/pub/List.aspx?c_id=5&class_set_id=2&class_id=141"]
 }
 
 def get_latest_urls_via_google(pref_name: str, base_url: str) -> List[str]:
@@ -109,7 +129,7 @@ def get_pagination_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
 
 def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
     # Google検索結果もこのキーワードでフィルタリングされます
-    keywords = ['動画', '映像', '配信', '撮影', 'プロモーション']
+    keywords = ['動画', '映像', '配信', '撮影', 'プロモーション',"作成]
     results = []
     found_pag_urls = []
     try:
