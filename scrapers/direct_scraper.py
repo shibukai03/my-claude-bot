@@ -1,4 +1,4 @@
-"""47都道府県 入札・公募ページ全ページ巡回エンジン（v1.4 Google検索救済・ログ強化版）"""
+"""47都道府県 入札・公募ページ全ページ巡回エンジン（v1.5 PDFリスト検知強化版）"""
 
 import requests
 from bs4 import BeautifulSoup
@@ -7,13 +7,14 @@ from typing import List, Dict, Set
 import time
 import os
 import re
+import unicodedata # 🆕 文字正規化用に追加
 from urllib.parse import urljoin
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
-# URLリスト
+# URLリスト (現在のリストをそのまま維持)
 PREFECTURE_BID_PAGES = {
     "北海道": ["https://www.pref.hokkaido.lg.jp/news/nyusatsu/", "https://www.pref.hokkaido.lg.jp/category/d001/c001/s002/"],
     "青森県": ["https://www.pref.aomori.lg.jp/soshiki/suito/keiri/buppin-top.html", "https://www.pref.aomori.lg.jp/boshu/index_1.html"],
@@ -92,25 +93,19 @@ def get_latest_urls_via_google(pref_name: str, base_url: str) -> List[str]:
     cx = os.getenv('CUSTOM_SEARCH_ENGINE_ID')
     if not api_key or not cx: return []
     
-    # ドメインをURLから抽出（例: pref.miyagi.lg.jp）
     domain = base_url.split('/')[2]
     
-    # 🆕 ご要望のキーワードに拡張
-    query = f"site:{domain} (映像 OR 動画 OR 撮影 OR 配信 OR プロモーション) 募集"
+    # クエリを強化：公募・案件・募集を反映
+    query = f"site:{domain} (映像 OR 動画 OR 撮影 OR 配信 OR プロモーション OR 作成) (募集 OR 案件 OR 公募)"
     
-    # 🆕 クエリをログに出力
     logger.info(f"🔍 Google検索実行: {query}")
-    
     search_url = "https://www.googleapis.com/customsearch/v1"
-    params = {'key': api_key, 'cx': cx, 'q': query, 'num': 10} # 救済なので上位10件取得
+    params = {'key': api_key, 'cx': cx, 'q': query, 'num': 10}
     
     try:
         response = requests.get(search_url, params=params, timeout=10)
         items = response.json().get('items', [])
-        
-        # 🆕 ヒット件数をログに出力
         logger.info(f"🎯 Google検索結果: {len(items)}件の候補URLを取得しました")
-        
         return [item['link'] for item in items]
     except Exception as e:
         logger.error(f"❌ Google検索中にエラー: {e}")
@@ -128,8 +123,11 @@ def get_pagination_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
     return list(dict.fromkeys(pag_urls))[:5]
 
 def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
-    # Google検索結果もこのキーワードでフィルタリングされます
-    keywords = ['動画', '映像', '配信', '撮影', 'プロモーション', '作成']
+    # 1. 映像制作そのものを指す言葉
+    video_keywords = ['動画', '映像', '配信', '撮影', 'プロモーション', '作成', '制作']
+    # 🆕 2. 「この中に案件が隠れているかもしれない」リスト系キーワード (PDF判定用)
+    list_keywords = ['案件一覧', '募集一覧', '入札公告', '公募公告', '委託公告', '調達予定', '公募', '案件', '募集']
+    
     results = []
     found_pag_urls = []
     try:
@@ -142,13 +140,20 @@ def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
         for link in soup.find_all('a', href=True):
             text = link.get_text(strip=True)
             parent_text = link.parent.get_text(strip=True) if link.parent else ''
+            # 文字を正規化（全角半角の揺れを吸収）
+            combined_text = unicodedata.normalize('NFKC', text + parent_text)
             
             # 除外キーワード（質問回答などはここで捨てる）
             exclude_keywords = ["質問", "回答", "公表", "結果", "落札", "入札状況", "R6", "R7", "2024", "2025"]
-            combined_text = (text + parent_text)
             
-            if any(k in combined_text for k in keywords):
-                # 令和8年を含まない過去年度は除外
+            # 判定A: リンク名に直接「映像」等のキーワードが入っている場合
+            is_video_link = any(k in combined_text for k in video_keywords)
+            
+            # 判定B: リンク名が「案件」「公募」等のリスト名で、かつ「PDF」である場合（お宝PDF救済）
+            is_list_pdf = any(lk in combined_text for lk in list_keywords) and (".pdf" in combined_text.lower() or "pdf" in combined_text.lower())
+
+            if is_video_link or is_list_pdf:
+                # 令和8年を含まない過去年度や結果報告は除外
                 if any(ex in combined_text for ex in exclude_keywords) and "令和8" not in combined_text:
                     continue
                     
@@ -188,10 +193,9 @@ def search_all_prefectures_direct() -> Dict[str, List[Dict]]:
             
             time.sleep(0.5)
 
-        # 🆕 直接巡回で1件も「映像系」が見つからなかった場合のみGoogle検索救済を発動
+        # 直接巡回で1件も見つからなかった場合、またはリストPDFも探したい場合はGoogle検索を発動
         if not pref_combined_results:
             logger.info(f"{pref_name}: ヒットなし。Google検索APIで最終救済...")
-            # 第一URLのドメインを使って検索
             google_urls = get_latest_urls_via_google(pref_name, start_urls[0])
             for fb_url in google_urls:
                 data = scrape_prefecture_page(pref_name, fb_url)
