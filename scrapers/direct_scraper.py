@@ -1,4 +1,4 @@
-"""47都道府県 入札・公募ページ全ページ巡回エンジン（v1.5 PDFリスト検知強化版）"""
+"""47都道府県・20大都市 巡回エンジン（v1.6 PDFリスト透視 ＆ 全自治体統合版）"""
 
 import requests
 from bs4 import BeautifulSoup
@@ -7,14 +7,14 @@ from typing import List, Dict, Set
 import time
 import os
 import re
-import unicodedata # 🆕 文字正規化用に追加
+import unicodedata 
 from urllib.parse import urljoin
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
-# URLリスト (現在のリストをそのまま維持)
+# --- あなたの最新URLリスト（47都道府県 ＋ 20政令指定都市）をすべて維持 ---
 PREFECTURE_BID_PAGES = {
     "北海道": ["https://www.pref.hokkaido.lg.jp/news/nyusatsu/", "https://www.pref.hokkaido.lg.jp/category/d001/c001/s002/"],
     "青森県": ["https://www.pref.aomori.lg.jp/soshiki/suito/keiri/buppin-top.html", "https://www.pref.aomori.lg.jp/boshu/index_1.html"],
@@ -86,22 +86,15 @@ PREFECTURE_BID_PAGES = {
 }
 
 def get_latest_urls_via_google(pref_name: str, base_url: str) -> List[str]:
-    """
-    直接巡回でヒットしなかった場合のGoogle検索バックアップ（キーワード拡張 ＆ ログ強化版）
-    """
     api_key = os.getenv('GOOGLE_API_KEY')
     cx = os.getenv('CUSTOM_SEARCH_ENGINE_ID')
     if not api_key or not cx: return []
-    
     domain = base_url.split('/')[2]
-    
-    # クエリを強化：公募・案件・募集を反映
+    # クエリ強化：公募・案件・募集を反映
     query = f"site:{domain} (映像 OR 動画 OR 撮影 OR 配信 OR プロモーション OR 作成) (募集 OR 案件 OR 公募)"
-    
     logger.info(f"🔍 Google検索実行: {query}")
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {'key': api_key, 'cx': cx, 'q': query, 'num': 10}
-    
     try:
         response = requests.get(search_url, params=params, timeout=10)
         items = response.json().get('items', [])
@@ -125,7 +118,8 @@ def get_pagination_urls(soup: BeautifulSoup, base_url: str) -> List[str]:
 def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
     # 1. 映像制作そのものを指す言葉
     video_keywords = ['動画', '映像', '配信', '撮影', 'プロモーション', '作成', '制作']
-    # 🆕 2. 「この中に案件が隠れているかもしれない」リスト系キーワード (PDF判定用)
+    
+    # 🆕 2. 【お宝救済用】案件がまとまって入っている可能性があるリスト系キーワード
     list_keywords = ['案件一覧', '募集一覧', '入札公告', '公募公告', '委託公告', '調達予定', '公募', '案件', '募集']
     
     results = []
@@ -143,17 +137,17 @@ def scrape_prefecture_page(pref_name: str, url: str) -> Dict:
             # 文字を正規化（全角半角の揺れを吸収）
             combined_text = unicodedata.normalize('NFKC', text + parent_text)
             
-            # 除外キーワード（質問回答などはここで捨てる）
+            # 除外キーワード（これらのみの場合はスルー）
             exclude_keywords = ["質問", "回答", "公表", "結果", "落札", "入札状況", "R6", "R7", "2024", "2025"]
             
-            # 判定A: リンク名に直接「映像」等のキーワードが入っている場合
+            # 判定A: リンク名に直接「映像」等のキーワードが入っている
             is_video_link = any(k in combined_text for k in video_keywords)
             
-            # 判定B: リンク名が「案件」「公募」等のリスト名で、かつ「PDF」である場合（お宝PDF救済）
+            # 🆕 判定B: リンク名が「案件」「公募」等のリスト名で、かつ「PDF」である
             is_list_pdf = any(lk in combined_text for lk in list_keywords) and (".pdf" in combined_text.lower() or "pdf" in combined_text.lower())
 
             if is_video_link or is_list_pdf:
-                # 令和8年を含まない過去年度や結果報告は除外
+                # 令和8年を含まない過去年度や結果報告は除外（ただし令和8があれば救済）
                 if any(ex in combined_text for ex in exclude_keywords) and "令和8" not in combined_text:
                     continue
                     
@@ -193,7 +187,7 @@ def search_all_prefectures_direct() -> Dict[str, List[Dict]]:
             
             time.sleep(0.5)
 
-        # 直接巡回で1件も見つからなかった場合、またはリストPDFも探したい場合はGoogle検索を発動
+        # 直接巡回で1件もヒットしなかった場合のみGoogle救済
         if not pref_combined_results:
             logger.info(f"{pref_name}: ヒットなし。Google検索APIで最終救済...")
             google_urls = get_latest_urls_via_google(pref_name, start_urls[0])
