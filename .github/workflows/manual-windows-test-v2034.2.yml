@@ -9,9 +9,6 @@ on:
         default: '2034.2'
 
 jobs:
-  # ============================================================
-  # Job: test the NEW FIXED customer command (proposed for distribution)
-  # ============================================================
   test-fixed-command:
     runs-on: windows-latest
     timeout-minutes: 10
@@ -23,8 +20,9 @@ jobs:
           Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
           Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE"
           Write-Host "HOME: $HOME"
+          Write-Host "Console output encoding: $([Console]::OutputEncoding.EncodingName)"
 
-      - name: Fixed customer install command (v2034.2 amd64/arm64)
+      - name: Fixed customer install command (ASCII-only, PS 5.1 safe)
         shell: powershell
         run: |
           $V = "${{ inputs.version }}"
@@ -34,36 +32,34 @@ jobs:
               New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
               Set-Location $tempDir
 
-              Write-Host "[1/6] tar.gz をダウンロード中..."
+              Write-Host "[1/6] Downloading tar.gz..."
               $tarUrl = "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-update-v$V.tar.gz"
               iwr -useb $tarUrl -OutFile "sl.tar.gz"
-              if (-not (Test-Path "sl.tar.gz") -or (Get-Item "sl.tar.gz").Length -lt 1MB) { throw "tar.gz ダウンロード失敗 (size不足)" }
+              if (-not (Test-Path "sl.tar.gz") -or (Get-Item "sl.tar.gz").Length -lt 1MB) { throw "tar.gz download failed (size too small)" }
               Write-Host "  OK: $((Get-Item 'sl.tar.gz').Length) bytes"
 
-              Write-Host "[2/6] バイナリをダウンロード中..."
+              Write-Host "[2/6] Downloading binary..."
               $BIN_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
               New-Item -ItemType Directory -Force -Path "$HOME\.soloptilink","$HOME\.claude\skills" | Out-Null
               $binUrl = "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-windows-$BIN_ARCH.exe"
               iwr -useb $binUrl -OutFile "$HOME\.soloptilink\soloptilink.exe"
-              if (-not (Test-Path "$HOME\.soloptilink\soloptilink.exe") -or (Get-Item "$HOME\.soloptilink\soloptilink.exe").Length -lt 1MB) { throw "バイナリダウンロード失敗 ($BIN_ARCH)" }
+              if (-not (Test-Path "$HOME\.soloptilink\soloptilink.exe") -or (Get-Item "$HOME\.soloptilink\soloptilink.exe").Length -lt 1MB) { throw "binary download failed for $BIN_ARCH" }
               Write-Host "  OK: $BIN_ARCH / $((Get-Item "$HOME\.soloptilink\soloptilink.exe").Length) bytes"
 
-              Write-Host "[3/6] tarball を ~/.soloptilink/ に展開中..."
-              # --strip-components=1 で soloptilink-v$V/ プレフィックスを剥がす
-              # --exclude='._*' で macOS の AppleDouble メタデータを除外
+              Write-Host "[3/6] Extracting tarball to ~/.soloptilink/..."
               & tar -xzf "sl.tar.gz" -C "$HOME\.soloptilink" --strip-components=1 --exclude='._*'
-              if ($LASTEXITCODE -ne 0) { throw "tar 展開失敗 (exit=$LASTEXITCODE)" }
-              if (-not (Test-Path "$HOME\.soloptilink\lib\license-guard.sh")) { throw "展開後の lib/license-guard.sh が見つかりません" }
-              if (-not (Test-Path "$HOME\.soloptilink\chain.sh")) { throw "展開後の chain.sh が見つかりません" }
-              Write-Host "  OK: lib/license-guard.sh, chain.sh 存在確認"
+              if ($LASTEXITCODE -ne 0) { throw "tar extract failed (exit=$LASTEXITCODE)" }
+              if (-not (Test-Path "$HOME\.soloptilink\lib\license-guard.sh")) { throw "lib/license-guard.sh not found after extraction" }
+              if (-not (Test-Path "$HOME\.soloptilink\chain.sh")) { throw "chain.sh not found after extraction" }
+              Write-Host "  OK: lib/license-guard.sh, chain.sh verified"
 
-              Write-Host "[4/6] skills を Claude Code 側へ sync..."
-              if (-not (Test-Path "$HOME\.soloptilink\skills")) { throw "~/.soloptilink/skills が見つかりません" }
+              Write-Host "[4/6] Syncing skills to Claude Code..."
+              if (-not (Test-Path "$HOME\.soloptilink\skills")) { throw "~/.soloptilink/skills not found" }
               Copy-Item -Recurse -Force "$HOME\.soloptilink\skills\*" "$HOME\.claude\skills\"
               $skillCount = (Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue).Count
               Write-Host "  OK: $skillCount skills"
 
-              Write-Host "[5/6] .sh の CRLF -> LF 正規化..."
+              Write-Host "[5/6] CRLF -> LF normalization on .sh files..."
               $fixedCount = 0
               Get-ChildItem "$HOME\.soloptilink" -Filter "*.sh" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
                   try {
@@ -75,16 +71,16 @@ jobs:
                       }
                   } catch {}
               }
-              Write-Host "  OK: $fixedCount ファイル修正"
+              Write-Host "  OK: $fixedCount files normalized"
 
-              Write-Host "[6/6] バージョン確認..."
+              Write-Host "[6/6] Version check..."
               $versionOut = & "$HOME\.soloptilink\soloptilink.exe" --version 2>&1
               Write-Host "  $versionOut"
-              if ($versionOut -notmatch "v$V") { throw "バージョン不一致: '$versionOut' に v$V が含まれていません" }
+              if ($versionOut -notmatch "v$V") { throw "Version mismatch: '$versionOut' does not contain v$V" }
 
               Write-Host ""
               Write-Host "================================================"
-              Write-Host "  v$V 完全更新完了"
+              Write-Host "  v$V install complete"
               Write-Host "================================================"
               Write-Host "  ~/.soloptilink/  : $((Get-ChildItem "$HOME\.soloptilink").Count) items"
               Write-Host "  ~/.claude/skills/: $skillCount skills"
@@ -92,7 +88,7 @@ jobs:
           catch {
               Write-Host ""
               Write-Host "================================================" -ForegroundColor Red
-              Write-Host "  失敗: $_" -ForegroundColor Red
+              Write-Host "  FAILED: $_" -ForegroundColor Red
               Write-Host "================================================" -ForegroundColor Red
               exit 1
           }
@@ -130,22 +126,20 @@ jobs:
             }
           }
 
-          # AppleDouble metadata should be excluded by --exclude='._*'
           $appleDoubleFiles = Get-ChildItem "$HOME\.soloptilink" -Recurse -Filter "._*" -ErrorAction SilentlyContinue
           if ($appleDoubleFiles.Count -gt 0) {
-            Write-Host "WARN: $($appleDoubleFiles.Count) AppleDouble (._*) files remain — exclude not effective"
+            Write-Host "WARN: $($appleDoubleFiles.Count) AppleDouble (._*) files remain"
           } else {
             Write-Host "OK   AppleDouble (._*) excluded"
           }
 
-          # Component counts
           if (Test-Path "$HOME\.soloptilink\version-manifest.json") {
             $manifest = Get-Content "$HOME\.soloptilink\version-manifest.json" -Raw | ConvertFrom-Json
             $skillCount = (Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue).Count
             $agentCount = (Get-ChildItem "$HOME\.soloptilink\agents" -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }).Count
             $libCount = (Get-ChildItem "$HOME\.soloptilink\lib" -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }).Count
             Write-Host ""
-            Write-Host "=== Component counts vs manifest (should now match) ==="
+            Write-Host "=== Component counts vs manifest ==="
             Write-Host "skills:  installed=$skillCount   manifest=$($manifest.components.skills)"
             Write-Host "agents:  installed=$agentCount   manifest=$($manifest.components.agents)"
             Write-Host "lib:     installed=$libCount     manifest=$($manifest.components.lib_modules)"
