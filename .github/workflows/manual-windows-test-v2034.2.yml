@@ -73,21 +73,23 @@ jobs:
       - name: Run bundled installer (soloptilink-install.ps1)
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
           $V = "${{ inputs.version }}"
           Set-Location "$env:TEMP\sl-update"
-          $installer = "soloptilink-v$V\installer\soloptilink-install.ps1"
+          $installer = "$PWD\soloptilink-v$V\installer\soloptilink-install.ps1"
           $tarball = "$PWD\soloptilink-update-v$V.tar.gz"
           Write-Host "=== Invoking installer ==="
           Write-Host "  Installer: $installer"
           Write-Host "  Tarball:   $tarball"
-          # Installer uses End-Pause / ReadKey which would hang in CI; we set Host.Name check to avoid it
-          # The installer checks $Host.Name -eq "ConsoleHost" — in GA powershell it IS ConsoleHost
-          # So we need to feed input. Workaround: pipe Enter key
-          # Actually simpler: invoke with a redirected stdin
-          $process = Start-Process powershell -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$installer,"-TarballPath",$tarball -Wait -PassThru -NoNewWindow -RedirectStandardInput "NUL"
-          Write-Host "=== Installer exit code: $($process.ExitCode) ==="
-          if ($process.ExitCode -ne 0) {
-            Write-Host "Installer failed"
+          # Patch out the interactive ReadKey (CI cannot satisfy it; End-Pause would hang)
+          $content = Get-Content $installer -Raw
+          $patched = $content -replace '\[void\]\[System\.Console\]::ReadKey\(\$true\)', '# CI-patched: skipped'
+          Set-Content -Path $installer -Value $patched -NoNewline
+          Write-Host "ReadKey patched out for CI"
+          # Run installer directly (no Start-Process, no stdin redirection)
+          & $installer -TarballPath $tarball
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Installer failed with exit $LASTEXITCODE"
             exit 1
           }
 
