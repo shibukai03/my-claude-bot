@@ -82,10 +82,11 @@ jobs:
           Write-Host "  Installer: $installer"
           Write-Host "  Tarball:   $tarball"
           # Patch out the interactive ReadKey (CI cannot satisfy it; End-Pause would hang)
-          $content = Get-Content $installer -Raw
+          # Use .NET IO with explicit UTF-8 no-BOM to preserve Japanese characters in the file
+          $content = [System.IO.File]::ReadAllText($installer, [System.Text.UTF8Encoding]::new($false))
           $patched = $content -replace '\[void\]\[System\.Console\]::ReadKey\(\$true\)', '# CI-patched: skipped'
-          Set-Content -Path $installer -Value $patched -NoNewline
-          Write-Host "ReadKey patched out for CI"
+          [System.IO.File]::WriteAllText($installer, $patched, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "ReadKey patched out for CI (UTF-8 NoBOM preserved)"
           # Run installer directly (no Start-Process, no stdin redirection)
           & $installer -TarballPath $tarball
           if ($LASTEXITCODE -ne 0) {
