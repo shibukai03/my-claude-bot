@@ -9,32 +9,12 @@ on:
         default: '2034.2'
 
 jobs:
-  # ----------------------------------------------------------------
-  # Approach A: Customer command from memory (KNOWN BROKEN — kept for regression)
-  # ----------------------------------------------------------------
-  test-customer-command:
+  # ============================================================
+  # Job: test the NEW FIXED customer command (proposed for distribution)
+  # ============================================================
+  test-fixed-command:
     runs-on: windows-latest
     timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - name: Customer command (memo verbatim, EXPECTED TO FAIL on scripts/ missing)
-        shell: powershell
-        run: |
-          $V = "${{ inputs.version }}"
-          New-Item -ItemType Directory -Force -Path "$env:TEMP\sl-update" | Out-Null
-          Set-Location "$env:TEMP\sl-update"
-          iwr -useb "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-update-v$V.tar.gz" -OutFile sl.tar.gz
-          tar -xzf sl.tar.gz
-          New-Item -ItemType Directory -Force -Path "$HOME\.claude\skills","$HOME\.soloptilink" | Out-Null
-          Copy-Item -Recurse -Force "soloptilink-v$V\skills\*" "$HOME\.claude\skills\"
-          Copy-Item -Recurse -Force "soloptilink-v$V\chain.sh","soloptilink-v$V\lib","soloptilink-v$V\scripts","soloptilink-v$V\installer" "$HOME\.soloptilink\"
-
-  # ----------------------------------------------------------------
-  # Approach B: Use the bundled installer/soloptilink-install.ps1 (proper path)
-  # ----------------------------------------------------------------
-  test-bundled-installer:
-    runs-on: windows-latest
-    timeout-minutes: 15
     steps:
       - name: System info
         shell: powershell
@@ -44,92 +24,83 @@ jobs:
           Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE"
           Write-Host "HOME: $HOME"
 
-      - name: Download tarball + extract installer
+      - name: Fixed customer install command (v2034.2 amd64/arm64)
         shell: powershell
         run: |
           $V = "${{ inputs.version }}"
-          New-Item -ItemType Directory -Force -Path "$env:TEMP\sl-update" | Out-Null
-          Set-Location "$env:TEMP\sl-update"
-          iwr -useb "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-update-v$V.tar.gz" -OutFile "soloptilink-update-v$V.tar.gz"
-          Write-Host "=== tar.gz downloaded ==="
-          Get-Item "soloptilink-update-v$V.tar.gz" | Format-Table Name, Length
-          # Extract everything so we can grab the installer
-          tar -xzf "soloptilink-update-v$V.tar.gz"
-          Write-Host "=== extracted contents ==="
-          Get-ChildItem "soloptilink-v$V" | Format-Table Name, Mode
-          Write-Host "=== installer/ ==="
-          Get-ChildItem "soloptilink-v$V\installer" | Format-Table Name, Length
+          $ErrorActionPreference = "Stop"
+          $tempDir = Join-Path $env:TEMP "sl-update-$V"
+          try {
+              New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+              Set-Location $tempDir
 
-      - name: Download Windows launcher binary
-        shell: powershell
-        run: |
-          $V = "${{ inputs.version }}"
-          $BIN_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-          Write-Host "Binary arch: $BIN_ARCH"
-          New-Item -ItemType Directory -Force -Path "$HOME\.soloptilink" | Out-Null
-          iwr -useb "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-windows-$BIN_ARCH.exe" -OutFile "$HOME\.soloptilink\soloptilink.exe"
-          Get-Item "$HOME\.soloptilink\soloptilink.exe" | Format-Table Name, Length
+              Write-Host "[1/6] tar.gz をダウンロード中..."
+              $tarUrl = "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-update-v$V.tar.gz"
+              iwr -useb $tarUrl -OutFile "sl.tar.gz"
+              if (-not (Test-Path "sl.tar.gz") -or (Get-Item "sl.tar.gz").Length -lt 1MB) { throw "tar.gz ダウンロード失敗 (size不足)" }
+              Write-Host "  OK: $((Get-Item 'sl.tar.gz').Length) bytes"
 
-      - name: Run bundled installer (soloptilink-install.ps1)
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $V = "${{ inputs.version }}"
-          Set-Location "$env:TEMP\sl-update"
-          $installer = "$PWD\soloptilink-v$V\installer\soloptilink-install.ps1"
-          $tarball = "$PWD\soloptilink-update-v$V.tar.gz"
-          Write-Host "=== Invoking installer ==="
-          Write-Host "  Installer: $installer"
-          Write-Host "  Tarball:   $tarball"
-          # Check file BOM
-          $bytes = [System.IO.File]::ReadAllBytes($installer)
-          $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
-          Write-Host "Original installer file BOM: $hasBom"
-          Write-Host "Original installer file size: $($bytes.Length) bytes"
-          # PowerShell 5.1 requires UTF-8 BOM to interpret file as UTF-8 (otherwise cp1252)
-          # Read content using UTF-8 (without BOM) decoding
-          $content = [System.Text.UTF8Encoding]::new($false).GetString($bytes)
-          # Patch out the interactive ReadKey (CI cannot satisfy it; End-Pause would hang)
-          $patched = $content -replace '\[void\]\[System\.Console\]::ReadKey\(\$true\)', '# CI-patched: skipped'
-          # Write back WITH BOM so PowerShell 5.1 reads as UTF-8
-          [System.IO.File]::WriteAllText($installer, $patched, [System.Text.UTF8Encoding]::new($true))
-          Write-Host "Patched + wrote with UTF-8 BOM"
-          # Run installer directly (no Start-Process, no stdin redirection)
-          & $installer -TarballPath $tarball
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Installer failed with exit $LASTEXITCODE"
-            exit 1
+              Write-Host "[2/6] バイナリをダウンロード中..."
+              $BIN_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+              New-Item -ItemType Directory -Force -Path "$HOME\.soloptilink","$HOME\.claude\skills" | Out-Null
+              $binUrl = "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-windows-$BIN_ARCH.exe"
+              iwr -useb $binUrl -OutFile "$HOME\.soloptilink\soloptilink.exe"
+              if (-not (Test-Path "$HOME\.soloptilink\soloptilink.exe") -or (Get-Item "$HOME\.soloptilink\soloptilink.exe").Length -lt 1MB) { throw "バイナリダウンロード失敗 ($BIN_ARCH)" }
+              Write-Host "  OK: $BIN_ARCH / $((Get-Item "$HOME\.soloptilink\soloptilink.exe").Length) bytes"
+
+              Write-Host "[3/6] tarball を ~/.soloptilink/ に展開中..."
+              # --strip-components=1 で soloptilink-v$V/ プレフィックスを剥がす
+              # --exclude='._*' で macOS の AppleDouble メタデータを除外
+              & tar -xzf "sl.tar.gz" -C "$HOME\.soloptilink" --strip-components=1 --exclude='._*'
+              if ($LASTEXITCODE -ne 0) { throw "tar 展開失敗 (exit=$LASTEXITCODE)" }
+              if (-not (Test-Path "$HOME\.soloptilink\lib\license-guard.sh")) { throw "展開後の lib/license-guard.sh が見つかりません" }
+              if (-not (Test-Path "$HOME\.soloptilink\chain.sh")) { throw "展開後の chain.sh が見つかりません" }
+              Write-Host "  OK: lib/license-guard.sh, chain.sh 存在確認"
+
+              Write-Host "[4/6] skills を Claude Code 側へ sync..."
+              if (-not (Test-Path "$HOME\.soloptilink\skills")) { throw "~/.soloptilink/skills が見つかりません" }
+              Copy-Item -Recurse -Force "$HOME\.soloptilink\skills\*" "$HOME\.claude\skills\"
+              $skillCount = (Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue).Count
+              Write-Host "  OK: $skillCount skills"
+
+              Write-Host "[5/6] .sh の CRLF -> LF 正規化..."
+              $fixedCount = 0
+              Get-ChildItem "$HOME\.soloptilink" -Filter "*.sh" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+                  try {
+                      $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+                      if ($bytes -contains 13) {
+                          $text = [System.IO.File]::ReadAllText($_.FullName) -replace "`r`n","`n" -replace "`r","`n"
+                          [System.IO.File]::WriteAllText($_.FullName, $text, [System.Text.UTF8Encoding]::new($false))
+                          $fixedCount++
+                      }
+                  } catch {}
+              }
+              Write-Host "  OK: $fixedCount ファイル修正"
+
+              Write-Host "[6/6] バージョン確認..."
+              $versionOut = & "$HOME\.soloptilink\soloptilink.exe" --version 2>&1
+              Write-Host "  $versionOut"
+              if ($versionOut -notmatch "v$V") { throw "バージョン不一致: '$versionOut' に v$V が含まれていません" }
+
+              Write-Host ""
+              Write-Host "================================================"
+              Write-Host "  v$V 完全更新完了"
+              Write-Host "================================================"
+              Write-Host "  ~/.soloptilink/  : $((Get-ChildItem "$HOME\.soloptilink").Count) items"
+              Write-Host "  ~/.claude/skills/: $skillCount skills"
+          }
+          catch {
+              Write-Host ""
+              Write-Host "================================================" -ForegroundColor Red
+              Write-Host "  失敗: $_" -ForegroundColor Red
+              Write-Host "================================================" -ForegroundColor Red
+              exit 1
+          }
+          finally {
+              if (Test-Path $tempDir) { Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue }
           }
 
-      - name: Sync skills to ~/.claude/skills/
-        shell: powershell
-        run: |
-          # Installer extracts to ~/.soloptilink/ (including skills/) but Claude Code reads from ~/.claude/skills/
-          New-Item -ItemType Directory -Force -Path "$HOME\.claude\skills" | Out-Null
-          if (Test-Path "$HOME\.soloptilink\skills") {
-            Copy-Item -Recurse -Force "$HOME\.soloptilink\skills\*" "$HOME\.claude\skills\"
-            Write-Host "Skills synced to ~/.claude/skills/"
-          } else {
-            Write-Host "WARNING: ~/.soloptilink/skills/ not found"
-            exit 1
-          }
-
-      - name: Verify --version
-        shell: powershell
-        run: |
-          $V = "${{ inputs.version }}"
-          $versionOutput = & "$HOME\.soloptilink\soloptilink.exe" --version 2>&1
-          Write-Host "=== --version output ==="
-          Write-Host $versionOutput
-          $expected = "v$V"
-          if ($versionOutput -match [regex]::Escape($expected)) {
-            Write-Host "OK Version verified: contains $expected"
-          } else {
-            Write-Host "FAIL Version output does not contain '$expected'"
-            exit 1
-          }
-
-      - name: Verify file completeness
+      - name: Verify full file completeness
         shell: powershell
         run: |
           $errors = @()
@@ -151,42 +122,42 @@ jobs:
             "auto-update.sh"  = "$HOME\.soloptilink\auto-update.sh"
           }
           foreach ($name in $checks.Keys) {
-            $path = $checks[$name]
-            if (Test-Path $path) {
+            if (Test-Path $checks[$name]) {
               Write-Host "OK   $name"
             } else {
-              Write-Host "FAIL $name  ($path)"
+              Write-Host "FAIL $name"
               $errors += $name
             }
           }
 
-          # Component counts from manifest
+          # AppleDouble metadata should be excluded by --exclude='._*'
+          $appleDoubleFiles = Get-ChildItem "$HOME\.soloptilink" -Recurse -Filter "._*" -ErrorAction SilentlyContinue
+          if ($appleDoubleFiles.Count -gt 0) {
+            Write-Host "WARN: $($appleDoubleFiles.Count) AppleDouble (._*) files remain — exclude not effective"
+          } else {
+            Write-Host "OK   AppleDouble (._*) excluded"
+          }
+
+          # Component counts
           if (Test-Path "$HOME\.soloptilink\version-manifest.json") {
             $manifest = Get-Content "$HOME\.soloptilink\version-manifest.json" -Raw | ConvertFrom-Json
             $skillCount = (Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue).Count
             $agentCount = (Get-ChildItem "$HOME\.soloptilink\agents" -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }).Count
             $libCount = (Get-ChildItem "$HOME\.soloptilink\lib" -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }).Count
             Write-Host ""
-            Write-Host "=== Component counts vs manifest ==="
+            Write-Host "=== Component counts vs manifest (should now match) ==="
             Write-Host "skills:  installed=$skillCount   manifest=$($manifest.components.skills)"
             Write-Host "agents:  installed=$agentCount   manifest=$($manifest.components.agents)"
             Write-Host "lib:     installed=$libCount     manifest=$($manifest.components.lib_modules)"
           }
 
-          if ($errors.Count -gt 0) {
-            Write-Host ""
-            Write-Host "=== FAILURES: $($errors.Count) ==="
-            exit 1
-          } else {
-            Write-Host ""
-            Write-Host "=== ALL CHECKS PASSED ==="
-          }
+          if ($errors.Count -gt 0) { exit 1 } else { Write-Host ""; Write-Host "=== ALL CHECKS PASSED ===" }
 
       - name: Manifest dump (always)
         if: always()
         shell: powershell
         run: |
           Write-Host "=== ~/.soloptilink top-level ==="
-          Get-ChildItem "$HOME\.soloptilink" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Get-ChildItem "$HOME\.soloptilink" -ErrorAction SilentlyContinue | Format-Table Name
           Write-Host "=== ~/.claude/skills ==="
           Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue | Format-Table Name
