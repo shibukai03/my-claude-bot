@@ -1,0 +1,71 @@
+name: Manual - Windows iex One-Liner v2034.2 Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test (e.g. 2034.2)'
+        required: true
+        default: '2034.2'
+
+jobs:
+  test-iex-oneliner:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: System info
+        shell: powershell
+        run: |
+          Write-Host "OS: $([Environment]::OSVersion.VersionString)"
+          Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
+          Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE"
+          Write-Host "HOME: $HOME"
+
+      - name: Run the actual customer one-liner (iex from raw URL)
+        shell: powershell
+        run: |
+          $V = "${{ inputs.version }}"
+          $rawUrl = "https://raw.githubusercontent.com/shibukai03/my-claude-bot/main/scripts/install-soloptilink-v$V-windows.ps1"
+          Write-Host "Customer command:"
+          Write-Host "  iex ((iwr -useb `"$rawUrl`").Content)"
+          Write-Host ""
+          Write-Host "Executing..."
+          Write-Host "================================================"
+          iex ((iwr -useb $rawUrl).Content)
+          Write-Host "================================================"
+          Write-Host "iex exit code: $LASTEXITCODE"
+
+      - name: Verify install completeness
+        shell: powershell
+        run: |
+          $errors = @()
+          $checks = @{
+            "soloptilink.exe" = "$HOME\.soloptilink\soloptilink.exe"
+            "chain.sh"        = "$HOME\.soloptilink\chain.sh"
+            "lib/license-guard.sh" = "$HOME\.soloptilink\lib\license-guard.sh"
+            "lib/core/layer-loader.sh" = "$HOME\.soloptilink\lib\core\layer-loader.sh"
+            "installer/"      = "$HOME\.soloptilink\installer"
+            "agents/"         = "$HOME\.soloptilink\agents"
+            "hooks/"          = "$HOME\.soloptilink\hooks"
+            "migration/"      = "$HOME\.soloptilink\migration"
+            "skills/ in ~/.soloptilink" = "$HOME\.soloptilink\skills"
+            "skills/ in ~/.claude" = "$HOME\.claude\skills"
+            "VERSION"         = "$HOME\.soloptilink\VERSION"
+            "version-manifest.json" = "$HOME\.soloptilink\version-manifest.json"
+          }
+          foreach ($name in $checks.Keys) {
+            if (Test-Path $checks[$name]) {
+              Write-Host "OK   $name"
+            } else {
+              Write-Host "FAIL $name"
+              $errors += $name
+            }
+          }
+          if ($errors.Count -gt 0) { exit 1 } else { Write-Host ""; Write-Host "=== ALL CHECKS PASSED ===" }
+
+      - name: Dump install dir
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "=== ~/.soloptilink top-level ==="
+          Get-ChildItem "$HOME\.soloptilink" -ErrorAction SilentlyContinue | Format-Table Name
