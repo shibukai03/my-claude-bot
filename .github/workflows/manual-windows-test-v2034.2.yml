@@ -81,12 +81,19 @@ jobs:
           Write-Host "=== Invoking installer ==="
           Write-Host "  Installer: $installer"
           Write-Host "  Tarball:   $tarball"
+          # Check file BOM
+          $bytes = [System.IO.File]::ReadAllBytes($installer)
+          $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+          Write-Host "Original installer file BOM: $hasBom"
+          Write-Host "Original installer file size: $($bytes.Length) bytes"
+          # PowerShell 5.1 requires UTF-8 BOM to interpret file as UTF-8 (otherwise cp1252)
+          # Read content using UTF-8 (without BOM) decoding
+          $content = [System.Text.UTF8Encoding]::new($false).GetString($bytes)
           # Patch out the interactive ReadKey (CI cannot satisfy it; End-Pause would hang)
-          # Use .NET IO with explicit UTF-8 no-BOM to preserve Japanese characters in the file
-          $content = [System.IO.File]::ReadAllText($installer, [System.Text.UTF8Encoding]::new($false))
           $patched = $content -replace '\[void\]\[System\.Console\]::ReadKey\(\$true\)', '# CI-patched: skipped'
-          [System.IO.File]::WriteAllText($installer, $patched, [System.Text.UTF8Encoding]::new($false))
-          Write-Host "ReadKey patched out for CI (UTF-8 NoBOM preserved)"
+          # Write back WITH BOM so PowerShell 5.1 reads as UTF-8
+          [System.IO.File]::WriteAllText($installer, $patched, [System.Text.UTF8Encoding]::new($true))
+          Write-Host "Patched + wrote with UTF-8 BOM"
           # Run installer directly (no Start-Process, no stdin redirection)
           & $installer -TarballPath $tarball
           if ($LASTEXITCODE -ne 0) {
