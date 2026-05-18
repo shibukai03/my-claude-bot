@@ -1,0 +1,113 @@
+name: Manual - Windows v2034.2 Install Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test (e.g. 2034.2)'
+        required: true
+        default: '2034.2'
+
+jobs:
+  test-install:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: System info
+        shell: powershell
+        run: |
+          Write-Host "=== Windows Version ==="
+          [Environment]::OSVersion | Format-List
+          Write-Host "=== PowerShell Version ==="
+          $PSVersionTable | Out-String
+          Write-Host "=== Architecture ==="
+          Write-Host "PROCESSOR_ARCHITECTURE = $env:PROCESSOR_ARCHITECTURE"
+          Write-Host "=== tar.exe available? ==="
+          Get-Command tar.exe -ErrorAction SilentlyContinue | Out-String
+          Write-Host "=== HOME ==="
+          Write-Host $HOME
+
+      - name: Run customer install command (verbatim from memory)
+        shell: powershell
+        run: |
+          $V = "${{ inputs.version }}"
+          New-Item -ItemType Directory -Force -Path "$env:TEMP\sl-update" | Out-Null
+          Set-Location "$env:TEMP\sl-update"
+          iwr -useb "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-update-v$V.tar.gz" -OutFile sl.tar.gz
+          Write-Host "=== tar.gz downloaded ==="
+          Get-Item sl.tar.gz | Select-Object Name, Length | Format-Table
+          tar -xzf sl.tar.gz
+          Write-Host "=== extracted top-level ==="
+          Get-ChildItem | Format-Table Name, Mode
+          New-Item -ItemType Directory -Force -Path "$HOME\.claude\skills","$HOME\.soloptilink" | Out-Null
+          Copy-Item -Recurse -Force "soloptilink-v$V\skills\*" "$HOME\.claude\skills\"
+          Copy-Item -Recurse -Force "soloptilink-v$V\chain.sh","soloptilink-v$V\lib","soloptilink-v$V\scripts","soloptilink-v$V\installer" "$HOME\.soloptilink\"
+          $BIN_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+          Write-Host "=== Binary arch: $BIN_ARCH ==="
+          iwr -useb "https://github.com/onukih-design/soloptilink-releases/releases/download/v$V/soloptilink-windows-$BIN_ARCH.exe" -OutFile "$HOME\.soloptilink\soloptilink.exe"
+          Write-Host "=== Binary downloaded ==="
+          Get-Item "$HOME\.soloptilink\soloptilink.exe" | Select-Object Name, Length | Format-Table
+          Write-Host "=== Running --version ==="
+          $versionOutput = & "$HOME\.soloptilink\soloptilink.exe" --version 2>&1
+          Write-Host "OUTPUT:"
+          Write-Host $versionOutput
+          $versionOutput | Out-File -Encoding utf8 "$env:GITHUB_WORKSPACE\version_output.txt"
+
+      - name: Verify install success
+        shell: powershell
+        run: |
+          $V = "${{ inputs.version }}"
+          $errors = @()
+
+          if (-not (Test-Path "$HOME\.soloptilink\soloptilink.exe")) {
+            $errors += "soloptilink.exe not found"
+          } else {
+            $size = (Get-Item "$HOME\.soloptilink\soloptilink.exe").Length
+            Write-Host "soloptilink.exe size: $size bytes"
+            if ($size -lt 1MB) { $errors += "soloptilink.exe too small ($size bytes)" }
+          }
+
+          $skillCount = (Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue).Count
+          Write-Host "Skills count: $skillCount"
+          if ($skillCount -lt 10) { $errors += "Expected 10+ skills, got $skillCount" }
+
+          if (-not (Test-Path "$HOME\.soloptilink\lib")) { $errors += "lib/ directory not found" }
+          if (-not (Test-Path "$HOME\.soloptilink\chain.sh")) { $errors += "chain.sh not found" }
+          if (-not (Test-Path "$HOME\.soloptilink\scripts")) { $errors += "scripts/ directory not found" }
+          if (-not (Test-Path "$HOME\.soloptilink\installer")) { $errors += "installer/ directory not found" }
+
+          $expectedVersion = "v$V"
+          $versionContent = Get-Content "$env:GITHUB_WORKSPACE\version_output.txt" -Raw
+          Write-Host "=== version_output.txt content ==="
+          Write-Host $versionContent
+          if ($versionContent -notmatch [regex]::Escape($expectedVersion)) {
+            $errors += "Version output does not contain '$expectedVersion'. Got: $versionContent"
+          } else {
+            Write-Host "OK Version verified: contains $expectedVersion"
+          }
+
+          Write-Host "=== Verification Summary ==="
+          if ($errors.Count -eq 0) {
+            Write-Host "ALL CHECKS PASSED"
+          } else {
+            Write-Host "FAILURES:"
+            $errors | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+
+      - name: Installed files manifest (for inspection)
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "=== $HOME\.claude\skills (top-level) ==="
+          Get-ChildItem "$HOME\.claude\skills" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Write-Host "=== $HOME\.soloptilink (top-level) ==="
+          Get-ChildItem "$HOME\.soloptilink" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          Write-Host "=== $HOME\.soloptilink\lib (sample) ==="
+          Get-ChildItem "$HOME\.soloptilink\lib" -ErrorAction SilentlyContinue | Select-Object -First 20 | Format-Table Name
+
+      - name: Cleanup temp
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -Recurse -Force "$env:TEMP\sl-update" -ErrorAction SilentlyContinue
